@@ -60,9 +60,12 @@ kb
 ## Commands
 
 ```
-kb             Launch the interactive app installer (default)
-kb --version   Print version, commit, and build date
-kb --help      Show help
+kb                   Launch the interactive app installer (default)
+kb update            Check GitHub and update the binary in place
+kb update --check    Only check, do not install
+kb update --yes      Update without confirmation prompt
+kb --version         Print version, commit, and build date
+kb --help            Show help
 ```
 
 ## Building from source

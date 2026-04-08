@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -17,15 +18,35 @@ func newRootCmd() *cobra.Command {
 Run inside a Frappe bench container (via ffm shell) to select and install
 apps from the KB-Developpement GitHub organisation.`,
 		SilenceUsage: true,
-		Version:      fmt.Sprintf("%s (commit %s, built %s)", version.Version, version.Commit, version.Date),
+		Version: fmt.Sprintf("%s (commit %s, built %s)",
+			version.Version, version.Commit, version.Date),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInstall()
 		},
 	}
+
+	root.SetVersionTemplate("kb {{.Version}}\n")
+
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		if cmd.Name() != "update" {
+			runUpdateCheck()
+		}
+		return nil
+	}
+
+	root.AddCommand(newUpdateCmd())
+
 	return root
 }
 
-// Execute runs the root command.
+// Execute runs the root command and waits for any background update-check
+// goroutine to finish writing its state file before the process exits.
 func Execute() error {
-	return newRootCmd().Execute()
+	err := newRootCmd().Execute()
+	waitForUpdateCheck()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return err
+	}
+	return nil
 }
