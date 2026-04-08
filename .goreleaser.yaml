@@ -1,0 +1,45 @@
+version: 2
+
+project_name: kb
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: kb
+    main: ./cmd/kb
+    binary: kb
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/KB-Developpement/kb_pro_cli/internal/version.Version={{ .Version }}
+      - -X github.com/KB-Developpement/kb_pro_cli/internal/version.Commit={{ .Commit }}
+      - -X github.com/KB-Developpement/kb_pro_cli/internal/version.Date={{ .Date }}
+
+archives:
+  - id: kb
+    name_template: "kb_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
