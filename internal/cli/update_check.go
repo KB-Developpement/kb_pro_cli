@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-resty/resty/v2"
-
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
 	"github.com/KB-Developpement/kb_pro_cli/internal/version"
 )
@@ -67,9 +65,8 @@ func startBackgroundFetch(path string) {
 
 func fetchAndStoreLatestRelease(path string) {
 	var release githubRelease
-	resp, err := resty.New().R().
+	resp, err := githubClient().R().
 		SetResult(&release).
-		SetHeader("Accept", "application/vnd.github+json").
 		Get(githubReleasesAPI)
 	if err != nil || resp.StatusCode() != 200 || release.TagName == "" {
 		return

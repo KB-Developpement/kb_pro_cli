@@ -20,13 +20,16 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/version"
 )
 
-const githubReleasesAPI = "https://api.github.com/repos/KB-Developpement/kb_pro_cli/releases/latest"
+const (
+	githubReleasesAPI = "https://api.github.com/repos/KB-Developpement/kb_pro_cli/releases/latest"
+	githubAssetsAPI   = "https://api.github.com/repos/KB-Developpement/kb_pro_cli/releases/assets/%d"
+)
 
 type githubRelease struct {
 	TagName string `json:"tag_name"`
 	Assets  []struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
+		ID   int    `json:"id"`
+		Name string `json:"name"`
 	} `json:"assets"`
 }
 
@@ -37,6 +40,8 @@ func newUpdateCmd() *cobra.Command {
 		Use:   "update",
 		Short: "Update kb to the latest version",
 		Long: `Check GitHub for the latest kb release and replace the binary in place.
+
+Requires GITHUB_TOKEN env var (private repository).
 
 Examples:
   kb update           # Check and update (asks for confirmation)
@@ -52,7 +57,22 @@ Examples:
 	return cmd
 }
 
+// githubClient returns a resty client with GitHub auth headers pre-set.
+// GITHUB_TOKEN is required for private repositories.
+func githubClient() *resty.Client {
+	c := resty.New().
+		SetHeader("Accept", "application/vnd.github+json")
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		c.SetHeader("Authorization", "Bearer "+token)
+	}
+	return c
+}
+
 func runUpdate(checkOnly, yes bool) error {
+	if os.Getenv("GITHUB_TOKEN") == "" {
+		fmt.Fprintln(os.Stderr, "Warning: GITHUB_TOKEN is not set — update check may fail for private repositories.")
+	}
+
 	current := version.Version
 
 	var release githubRelease
@@ -60,12 +80,15 @@ func runUpdate(checkOnly, yes bool) error {
 	_ = spinner.New().
 		Title("Checking for updates…").
 		Action(func() {
-			resp, err := resty.New().R().
+			resp, err := githubClient().R().
 				SetResult(&release).
-				SetHeader("Accept", "application/vnd.github+json").
 				Get(githubReleasesAPI)
 			if err != nil {
 				fetchErr = fmt.Errorf("fetching release info: %w", err)
+				return
+			}
+			if resp.StatusCode() == 401 || resp.StatusCode() == 404 {
+				fetchErr = fmt.Errorf("GitHub API returned HTTP %d — ensure GITHUB_TOKEN has 'repo' scope", resp.StatusCode())
 				return
 			}
 			if resp.StatusCode() != 200 {
@@ -100,16 +123,16 @@ func runUpdate(checkOnly, yes bool) error {
 		return nil
 	}
 
-	// Find the matching release asset for this OS/arch.
+	// Find the matching release asset ID for this OS/arch.
 	target := releaseAssetName(latest)
-	var downloadURL string
+	assetID := 0
 	for _, a := range release.Assets {
 		if a.Name == target {
-			downloadURL = a.BrowserDownloadURL
+			assetID = a.ID
 			break
 		}
 	}
-	if downloadURL == "" {
+	if assetID == 0 {
 		return fmt.Errorf("no asset found for %s/%s (expected %q)", runtime.GOOS, runtime.GOARCH, target)
 	}
 
@@ -133,7 +156,7 @@ func runUpdate(checkOnly, yes bool) error {
 	_ = spinner.New().
 		Title(fmt.Sprintf("Downloading kb %s…", latest)).
 		Action(func() {
-			installErr = downloadAndInstall(downloadURL)
+			installErr = downloadAndInstall(assetID)
 		}).
 		Run()
 	if installErr != nil {
@@ -144,8 +167,13 @@ func runUpdate(checkOnly, yes bool) error {
 	return nil
 }
 
-func downloadAndInstall(downloadURL string) error {
-	resp, err := resty.New().R().Get(downloadURL)
+// downloadAndInstall fetches the release asset by ID (private-repo safe)
+// and replaces the running binary.
+func downloadAndInstall(assetID int) error {
+	url := fmt.Sprintf(githubAssetsAPI, assetID)
+	resp, err := githubClient().
+		SetHeader("Accept", "application/octet-stream").
+		R().Get(url)
 	if err != nil {
 		return fmt.Errorf("downloading: %w", err)
 	}
