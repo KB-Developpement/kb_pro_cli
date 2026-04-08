@@ -9,13 +9,21 @@ An interactive CLI that runs inside a Frappe bench container and lets you pick a
 
 ## Installation
 
-Run this from inside the bench container (`ffm shell <bench-name>`):
+### One-liner (inside the bench container)
 
 ```sh
+ffm shell <bench-name>
 curl -fsSL https://raw.githubusercontent.com/KB-Developpement/kb_pro_cli/main/install.sh | sh
 ```
 
-Detects OS and architecture, downloads the latest release binary, verifies the SHA256 checksum, and installs to `/usr/local/bin` (or `~/.local/bin` if the former is not writable).
+If the repository is **private**, export your GitHub token first:
+
+```sh
+export GITHUB_TOKEN=ghp_...
+curl -fsSL https://raw.githubusercontent.com/KB-Developpement/kb_pro_cli/main/install.sh | sh
+```
+
+The script detects OS and architecture, downloads the latest release binary, verifies the SHA256 checksum, and installs to `/usr/local/bin` (or `~/.local/bin` if the former is not writable).
 
 ### Build from source
 
@@ -40,7 +48,8 @@ kb
 2. Auto-detect the active site name
 3. Detect which KB apps are already installed and exclude them
 4. Show an interactive multi-select list of available apps
-5. Download and install each selected app sequentially
+5. Download and install each selected app sequentially with progress feedback
+6. Print a summary of successes and failures
 
 ## Available apps
 
@@ -60,12 +69,27 @@ kb
 ## Commands
 
 ```
-kb                   Launch the interactive app installer (default)
+kb                   Launch the interactive app installer
 kb update            Check GitHub and update the binary in place
 kb update --check    Only check, do not install
 kb update --yes      Update without confirmation prompt
 kb --version         Print version, commit, and build date
 kb --help            Show help
+```
+
+### Self-update
+
+`kb` checks for a newer release in the background on every invocation (results cached for 24 hours). When an update is available it prints a one-line notice to stderr:
+
+```
+Update available: v0.1.0 → v0.2.0  (run: kb update)
+```
+
+For private repositories, set `GITHUB_TOKEN` before running `kb update`:
+
+```sh
+export GITHUB_TOKEN=ghp_...
+kb update
 ```
 
 ## Building from source
@@ -77,6 +101,7 @@ make vet      # go vet
 make fmt      # gofmt
 make tidy     # go mod tidy
 make clean    # remove binary
+make help     # list all targets
 ```
 
 ## Releasing
@@ -88,4 +113,4 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-GoReleaser builds linux and darwin binaries (amd64 + arm64), creates a GitHub release, and publishes the checksums file used by `install.sh`.
+GoReleaser builds linux and darwin binaries (amd64 + arm64), creates a GitHub release with a `checksums.txt` file, and makes the binaries available to `install.sh` and `kb update`.
