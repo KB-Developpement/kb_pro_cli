@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,18 +71,27 @@ func DetectAppsInBench() map[string]bool {
 // DetectInstalledApps returns a set of app names currently installed on the given site.
 // On failure it returns nil and the error — callers should treat nil as "unknown".
 func DetectInstalledApps(site string) (map[string]bool, error) {
-	cmd := exec.Command("bench", "--site", site, "list-apps")
+	// --format json outputs {"site_name": ["app1", "app2", ...]} with clean app names only.
+	// The default text format includes version and branch per line which breaks name matching.
+	cmd := exec.Command("bench", "--site", site, "list-apps", "--format", "json")
 	cmd.Dir = benchRoot
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bench list-apps: %w", err)
 	}
 
+	var result map[string][]string
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("parsing bench list-apps output: %w", err)
+	}
+
 	installed := map[string]bool{}
-	for line := range strings.SplitSeq(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && line != site {
-			installed[line] = true
+	for _, appList := range result {
+		for _, app := range appList {
+			app = strings.TrimSpace(app)
+			if app != "" {
+				installed[app] = true
+			}
 		}
 	}
 	return installed, nil
