@@ -37,12 +37,12 @@ func runMainMenu() error {
 				Options(
 					huh.NewOption("Install apps          — download and install on this site", menuInstall),
 					huh.NewOption("Add apps to bench     — download only, skip site install", menuAdd),
-					huh.NewOption("Manage installed apps — uninstall or remove", menuManage),
+					huh.NewOption("Manage apps           — install downloaded / uninstall / remove", menuManage),
 					huh.NewOption("Update kb             — check for a newer version", menuUpdate),
 				).
 				Value(&choice),
 		),
-	).Run(); err != nil {
+	).WithKeyMap(formKeyMap()).Run(); err != nil {
 		return nil
 	}
 

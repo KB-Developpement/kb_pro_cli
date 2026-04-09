@@ -4,10 +4,20 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/version"
 )
+
+// formKeyMap returns a huh KeyMap where Esc is bound to Quit, matching the
+// behaviour users expect (Esc cancels / goes back to the shell).
+func formKeyMap() *huh.KeyMap {
+	km := huh.NewDefaultKeyMap()
+	km.Quit = key.NewBinding(key.WithKeys("ctrl+c", "esc"))
+	return km
+}
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{

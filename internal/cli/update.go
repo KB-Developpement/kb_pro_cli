@@ -124,7 +124,7 @@ func runUpdate(checkOnly, yes bool) error {
 					Description("←/→ or Y/N · Enter to confirm · Esc/Ctrl+C to cancel").
 					Value(&confirmed),
 			),
-		).Run()
+		).WithKeyMap(formKeyMap()).Run()
 		if err != nil || !confirmed {
 			fmt.Fprintln(os.Stderr, "Update cancelled.")
 			return nil

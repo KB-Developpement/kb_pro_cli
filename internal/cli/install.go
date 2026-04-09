@@ -33,7 +33,7 @@ func resolveToken() string {
 				Title("Save token to ~/.config/kb/github_token?").
 				Value(&saveToken),
 		),
-	).Run()
+	).WithKeyMap(formKeyMap()).Run()
 
 	if token == "" {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("No token provided — private repos may fail."))
@@ -48,19 +48,24 @@ func resolveToken() string {
 }
 
 // runInstall downloads and installs selected apps on the given site.
-// Skips apps already installed on the site.
+// Only shows apps that are not yet in the bench and not installed on site.
+// Apps already downloaded (in bench) should be installed via "Manage".
 func runInstall(site string) error {
 	installed, detectErr := bench.DetectInstalledApps(site)
 	if detectErr != nil {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Warning: could not detect installed apps — all apps will be shown"))
 	}
+	inBench := bench.DetectAppsInBench()
 
-	var alreadyInstalled []string
+	var alreadyInstalled, alreadyDownloaded []string
 	var selectable []apps.App
 	for _, app := range apps.All {
-		if installed[app.Name] {
+		switch {
+		case installed[app.Name]:
 			alreadyInstalled = append(alreadyInstalled, app.Name)
-		} else {
+		case inBench[app.Name]:
+			alreadyDownloaded = append(alreadyDownloaded, app.Name)
+		default:
 			selectable = append(selectable, app)
 		}
 	}
@@ -68,8 +73,11 @@ func runInstall(site string) error {
 	if len(alreadyInstalled) > 0 {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already installed: "+strings.Join(alreadyInstalled, ", ")))
 	}
+	if len(alreadyDownloaded) > 0 {
+		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already downloaded (use Manage to install): "+strings.Join(alreadyDownloaded, ", ")))
+	}
 	if len(selectable) == 0 {
-		fmt.Fprintln(os.Stdout, ui.Success.Render("All KB apps are already installed."))
+		fmt.Fprintln(os.Stdout, ui.Success.Render("All KB apps are already installed or downloaded."))
 		return nil
 	}
 
@@ -195,7 +203,7 @@ func selectApps(selectable []apps.App, title string) ([]string, error) {
 				Options(options...).
 				Value(&selected),
 		),
-	).Run(); err != nil {
+	).WithKeyMap(formKeyMap()).Run(); err != nil {
 		return nil, err
 	}
 
