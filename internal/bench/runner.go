@@ -35,10 +35,15 @@ func InstallApp(site, appName string) error {
 	return nil
 }
 
-// UninstallApp runs "bench --site <site> uninstall-app <appName>".
-// This removes the app from the site but keeps the source in the apps folder.
-func UninstallApp(site, appName string) error {
-	out, err := runBench("--site", site, "uninstall-app", appName)
+// UninstallApp runs "bench --site <site> uninstall-app <appName> -y [--force]".
+// -y bypasses bench's interactive confirmation (we already confirmed in the UI).
+// force adds --force to override any remaining guards.
+func UninstallApp(site, appName string, force bool) error {
+	args := []string{"--site", site, "uninstall-app", appName, "-y"}
+	if force {
+		args = append(args, "--force")
+	}
+	out, err := runBench(args...)
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, out)
 	}

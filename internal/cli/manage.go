@@ -21,15 +21,18 @@ const (
 )
 
 func newManageCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+
+	cmd := &cobra.Command{
 		Use:   "manage",
 		Short: "Manage installed KB Frappe apps (uninstall / remove)",
 		Long: `Interactively manage KB apps that are currently installed on the bench.
 
 You can uninstall an app from the site, remove its source from the bench, or do both.
 
-  Uninstall  — bench --site <site> uninstall-app <app>  (removes from site, keeps source)
-  Remove     — bench remove-app <app>                   (deletes source from apps folder)`,
+  Uninstall  — bench --site <site> uninstall-app <app> -y  (removes from site, keeps source)
+  Remove     — uninstall first, then bench remove-app <app> (app must not be installed)
+  Both       — uninstall + remove in sequence`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !bench.InBenchContainer() {
@@ -40,12 +43,15 @@ You can uninstall an app from the site, remove its source from the bench, or do 
 				return fmt.Errorf("could not detect site name: %w\nSet the active site with: bench use <site>", err)
 			}
 			fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
-			return runManage(site)
+			return runManage(site, force)
 		},
 	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Pass --force to bench uninstall-app")
+	return cmd
 }
 
-func runManage(site string) error {
+func runManage(site string, force bool) error {
 	// 1. Detect installed apps.
 	installed, err := bench.DetectInstalledApps(site)
 	if err != nil {
@@ -134,23 +140,33 @@ func runManage(site string) error {
 		case actionUninstall:
 			if spinErr := spinner.New().
 				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
-				Action(func() { opErr = bench.UninstallApp(site, name) }).
+				Action(func() { opErr = bench.UninstallApp(site, name, force) }).
 				Run(); spinErr != nil {
 				opErr = spinErr
 			}
 
 		case actionRemove:
+			// bench remove-app requires the app to not be installed on any site.
+			// Since manage only lists installed apps, we must uninstall first.
 			if spinErr := spinner.New().
-				Title(fmt.Sprintf("Removing %s from bench…", ui.AppName.Render(name))).
-				Action(func() { opErr = bench.RemoveApp(name) }).
+				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
+				Action(func() { opErr = bench.UninstallApp(site, name, force) }).
 				Run(); spinErr != nil {
 				opErr = spinErr
+			}
+			if opErr == nil {
+				if spinErr := spinner.New().
+					Title(fmt.Sprintf("Removing %s from bench…", ui.AppName.Render(name))).
+					Action(func() { opErr = bench.RemoveApp(name) }).
+					Run(); spinErr != nil {
+					opErr = spinErr
+				}
 			}
 
 		case actionUninstallRemove:
 			if spinErr := spinner.New().
 				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
-				Action(func() { opErr = bench.UninstallApp(site, name) }).
+				Action(func() { opErr = bench.UninstallApp(site, name, force) }).
 				Run(); spinErr != nil {
 				opErr = spinErr
 			}

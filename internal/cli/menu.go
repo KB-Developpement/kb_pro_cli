@@ -51,7 +51,7 @@ func runMainMenu() error {
 	case menuAdd:
 		return runAddToBench()
 	case menuManage:
-		return runManage(site)
+		return runManage(site, false)
 	case menuUpdate:
 		return runUpdate(false, false)
 	}
