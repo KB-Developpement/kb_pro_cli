@@ -35,6 +35,7 @@ apps from the KB-Developpement GitHub organisation.`,
 	}
 
 	root.AddCommand(newUpdateCmd())
+	root.AddCommand(newManageCmd())
 
 	return root
 }
