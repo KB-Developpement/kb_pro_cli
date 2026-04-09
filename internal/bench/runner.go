@@ -15,7 +15,9 @@ func GetApp(rawURL, token string) error {
 	cloneURL := rawURL
 	if token != "" {
 		if u, err := url.Parse(rawURL); err == nil {
-			u.User = url.User(token)
+			// GitHub requires the token as the password for both classic and fine-grained PATs.
+			// Fine-grained PATs do not work when passed as the username only.
+			u.User = url.UserPassword("x-access-token", token)
 			cloneURL = u.String()
 		}
 	}

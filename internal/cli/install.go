@@ -26,7 +26,7 @@ func resolveToken() string {
 		huh.NewGroup(
 			huh.NewInput().
 				Title("GitHub Personal Access Token").
-				Description("Required for private repos. Set KB_GITHUB_TOKEN env var to skip this prompt.").
+				Description("Required for private repos. Set KB_GITHUB_TOKEN env var to skip this prompt. Tab to next field · Esc to skip").
 				EchoMode(huh.EchoModePassword).
 				Value(&token),
 			huh.NewConfirm().

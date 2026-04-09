@@ -60,8 +60,8 @@ Select one or more installed KB apps and choose an action:
 | Action | What it does |
 |--------|-------------|
 | Uninstall from site | `bench uninstall-app` — removes from site, source stays in bench |
-| Remove from bench | `bench remove-app` — deletes source folder, keeps site data |
-| Uninstall + Remove | Both of the above in sequence |
+| Remove from bench | `bench remove-app` — deletes source folder from bench (auto-uninstalls from site first if needed) |
+| Uninstall + Remove | Uninstall from site, then delete source folder |
 
 ### GitHub Token (private repos)
 
@@ -96,6 +96,7 @@ kb
 ```
 kb                   Launch the interactive main menu
 kb manage            Directly open the manage menu (uninstall / remove)
+kb manage --force    Pass --force to bench uninstall-app
 kb update            Check GitHub and update the binary in place
 kb update --check    Only check, do not install
 kb update --yes      Update without confirmation prompt

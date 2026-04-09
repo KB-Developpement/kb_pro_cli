@@ -121,6 +121,7 @@ func runUpdate(checkOnly, yes bool) error {
 			huh.NewGroup(
 				huh.NewConfirm().
 					Title(fmt.Sprintf("Install kb %s?", latest)).
+					Description("←/→ or Y/N · Enter to confirm · Esc/Ctrl+C to cancel").
 					Value(&confirmed),
 			),
 		).Run()

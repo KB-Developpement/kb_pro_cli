@@ -52,29 +52,34 @@ You can uninstall an app from the site, remove its source from the bench, or do 
 }
 
 func runManage(site string, force bool) error {
-	// 1. Detect installed apps.
+	// 1. Detect installed apps (on site) and all apps present in the bench folder.
 	installed, err := bench.DetectInstalledApps(site)
 	if err != nil {
 		return fmt.Errorf("could not detect installed apps: %w", err)
 	}
+	inBench := bench.DetectAppsInBench()
 
-	// 2. Filter registry to only installed KB apps.
+	// 2. Filter registry to apps present in bench (installed on site OR downloaded only).
 	var manageable []apps.App
 	for _, app := range apps.All {
-		if installed[app.Name] {
+		if inBench[app.Name] {
 			manageable = append(manageable, app)
 		}
 	}
 
 	if len(manageable) == 0 {
-		fmt.Fprintln(os.Stdout, ui.Dim.Render("No KB apps are currently installed on this site."))
+		fmt.Fprintln(os.Stdout, ui.Dim.Render("No KB apps found in bench."))
 		return nil
 	}
 
-	// 3. Multi-select: which apps to manage.
+	// 3. Multi-select: label bench-only apps so the user can tell them apart.
 	options := make([]huh.Option[string], len(manageable))
 	for i, app := range manageable {
-		options[i] = huh.NewOption(app.Name, app.Name)
+		label := app.Name
+		if !installed[app.Name] {
+			label += "  (not on site)"
+		}
+		options[i] = huh.NewOption(label, app.Name)
 	}
 
 	var selected []string
@@ -91,7 +96,7 @@ func runManage(site string, force bool) error {
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Choose action").
-				Description("What do you want to do with the selected app(s)?").
+				Description("↑/↓ to navigate · Enter to confirm · Esc to go back · Ctrl+C to cancel").
 				Options(
 					huh.NewOption("Uninstall from site  (keeps source in bench)", actionUninstall),
 					huh.NewOption("Remove from bench    (deletes source folder)", actionRemove),
@@ -120,7 +125,7 @@ func runManage(site string, force bool) error {
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title(fmt.Sprintf("About to %s: %s", actionLabel, strings.Join(selected, ", "))).
-				Description("This cannot be undone. Continue?").
+				Description("This cannot be undone. Continue? (←/→ or Y/N · Enter to confirm · Esc/Ctrl+C to cancel)").
 				Value(&confirmed),
 		),
 	).Run(); err != nil || !confirmed {
@@ -135,9 +140,14 @@ func runManage(site string, force bool) error {
 
 	for _, name := range selected {
 		var opErr error
+		isInstalled := installed[name]
 
 		switch action {
 		case actionUninstall:
+			if !isInstalled {
+				fmt.Fprintf(os.Stdout, "%s %s: not installed on site, skipping\n", ui.Dim.Render("–"), ui.AppName.Render(name))
+				continue
+			}
 			if spinErr := spinner.New().
 				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
 				Action(func() { opErr = bench.UninstallApp(site, name, force) }).
@@ -145,30 +155,16 @@ func runManage(site string, force bool) error {
 				opErr = spinErr
 			}
 
-		case actionRemove:
-			// bench remove-app requires the app to not be installed on any site.
-			// Since manage only lists installed apps, we must uninstall first.
-			if spinErr := spinner.New().
-				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
-				Action(func() { opErr = bench.UninstallApp(site, name, force) }).
-				Run(); spinErr != nil {
-				opErr = spinErr
-			}
-			if opErr == nil {
+		case actionRemove, actionUninstallRemove:
+			// bench remove-app requires the app not be installed on any site.
+			// Uninstall first if needed.
+			if isInstalled {
 				if spinErr := spinner.New().
-					Title(fmt.Sprintf("Removing %s from bench…", ui.AppName.Render(name))).
-					Action(func() { opErr = bench.RemoveApp(name) }).
+					Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
+					Action(func() { opErr = bench.UninstallApp(site, name, force) }).
 					Run(); spinErr != nil {
 					opErr = spinErr
 				}
-			}
-
-		case actionUninstallRemove:
-			if spinErr := spinner.New().
-				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
-				Action(func() { opErr = bench.UninstallApp(site, name, force) }).
-				Run(); spinErr != nil {
-				opErr = spinErr
 			}
 			if opErr == nil {
 				if spinErr := spinner.New().

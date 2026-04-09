@@ -33,6 +33,7 @@ func runMainMenu() error {
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("KB — What would you like to do?").
+				Description("↑/↓ to navigate · Enter to confirm · Esc/Ctrl+C to cancel").
 				Options(
 					huh.NewOption("Install apps          — download and install on this site", menuInstall),
 					huh.NewOption("Add apps to bench     — download only, skip site install", menuAdd),
