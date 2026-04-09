@@ -10,29 +10,51 @@ import (
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
+	"github.com/KB-Developpement/kb_pro_cli/internal/config"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
-func runInstall() error {
-	// 1. Verify we're inside a bench container.
-	if !bench.InBenchContainer() {
-		return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
+// resolveToken returns a GitHub token from env/config, prompting the user if none is found.
+func resolveToken() string {
+	token := config.LoadToken()
+	if token != "" {
+		return token
 	}
 
-	// 2. Detect site name.
-	site, err := bench.DetectSiteName()
-	if err != nil {
-		return fmt.Errorf("could not detect site name: %w\nSet the active site with: bench use <site>", err)
-	}
-	fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
+	var saveToken bool
+	_ = huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("GitHub Personal Access Token").
+				Description("Required for private repos. Set KB_GITHUB_TOKEN env var to skip this prompt.").
+				EchoMode(huh.EchoModePassword).
+				Value(&token),
+			huh.NewConfirm().
+				Title("Save token to ~/.config/kb/github_token?").
+				Value(&saveToken),
+		),
+	).Run()
 
-	// 3. Detect installed apps (non-fatal on error).
+	if token == "" {
+		fmt.Fprintln(os.Stderr, ui.Dim.Render("No token provided — private repos may fail."))
+		return ""
+	}
+	if saveToken {
+		if err := config.SaveToken(token); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not save token: %v\n", err)
+		}
+	}
+	return token
+}
+
+// runInstall downloads and installs selected apps on the given site.
+// Skips apps already installed on the site.
+func runInstall(site string) error {
 	installed, detectErr := bench.DetectInstalledApps(site)
 	if detectErr != nil {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Warning: could not detect installed apps — all apps will be shown"))
 	}
 
-	// 4. Split registry into already-installed and selectable.
 	var alreadyInstalled []string
 	var selectable []apps.App
 	for _, app := range apps.All {
@@ -46,103 +68,159 @@ func runInstall() error {
 	if len(alreadyInstalled) > 0 {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already installed: "+strings.Join(alreadyInstalled, ", ")))
 	}
-
 	if len(selectable) == 0 {
 		fmt.Fprintln(os.Stdout, ui.Success.Render("All KB apps are already installed."))
 		return nil
 	}
 
-	// 5. Build multi-select options.
+	selected, err := selectApps(selectable, "Select KB apps to install")
+	if err != nil || len(selected) == 0 {
+		return nil
+	}
+
+	token := resolveToken()
+
+	appByName := indexByName(selectable)
+	fmt.Fprintln(os.Stdout)
+
+	results := make([]installResult, 0, len(selected))
+
+	for _, name := range selected {
+		app := appByName[name]
+
+		var getErr error
+		if spinErr := spinner.New().
+			Title(fmt.Sprintf("Downloading %s…", ui.AppName.Render(name))).
+			Action(func() { getErr = bench.GetApp(app.URL, token) }).
+			Run(); spinErr != nil {
+			getErr = spinErr
+		}
+		if getErr != nil {
+			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), getErr)
+			results = append(results, installResult{name, getErr})
+			continue
+		}
+
+		var installErr error
+		if spinErr := spinner.New().
+			Title(fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(name), site)).
+			Action(func() { installErr = bench.InstallApp(site, name) }).
+			Run(); spinErr != nil {
+			installErr = spinErr
+		}
+		if installErr != nil {
+			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), installErr)
+			results = append(results, installResult{name, installErr})
+			continue
+		}
+
+		fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
+		results = append(results, installResult{name, nil})
+	}
+
+	printSummary(results)
+	return nil
+}
+
+// runAddToBench downloads selected apps into the bench apps folder without installing them on any site.
+// Skips apps whose source folder already exists in the bench.
+func runAddToBench() error {
+	inBench := bench.DetectAppsInBench()
+
+	var alreadyPresent []string
+	var selectable []apps.App
+	for _, app := range apps.All {
+		if inBench[app.Name] {
+			alreadyPresent = append(alreadyPresent, app.Name)
+		} else {
+			selectable = append(selectable, app)
+		}
+	}
+
+	if len(alreadyPresent) > 0 {
+		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already in bench: "+strings.Join(alreadyPresent, ", ")))
+	}
+	if len(selectable) == 0 {
+		fmt.Fprintln(os.Stdout, ui.Success.Render("All KB apps are already present in the bench."))
+		return nil
+	}
+
+	selected, err := selectApps(selectable, "Select KB apps to add to bench")
+	if err != nil || len(selected) == 0 {
+		return nil
+	}
+
+	token := resolveToken()
+
+	appByName := indexByName(selectable)
+	fmt.Fprintln(os.Stdout)
+
+	results := make([]installResult, 0, len(selected))
+
+	for _, name := range selected {
+		app := appByName[name]
+
+		var getErr error
+		if spinErr := spinner.New().
+			Title(fmt.Sprintf("Downloading %s…", ui.AppName.Render(name))).
+			Action(func() { getErr = bench.GetApp(app.URL, token) }).
+			Run(); spinErr != nil {
+			getErr = spinErr
+		}
+		if getErr != nil {
+			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), getErr)
+		} else {
+			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
+		}
+		results = append(results, installResult{name, getErr})
+	}
+
+	printSummary(results)
+	return nil
+}
+
+// selectApps shows a multi-select form and returns the chosen app names.
+func selectApps(selectable []apps.App, title string) ([]string, error) {
 	options := make([]huh.Option[string], len(selectable))
 	for i, app := range selectable {
 		options[i] = huh.NewOption(app.Name, app.Name)
 	}
 
 	var selected []string
-	form := huh.NewForm(
+	if err := huh.NewForm(
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
-				Title("Select KB apps to install").
+				Title(title).
 				Description("Space to toggle · Enter to confirm · Esc/Ctrl+C to cancel").
 				Options(options...).
 				Value(&selected),
 		),
-	)
-
-	if err := form.Run(); err != nil {
-		// ErrUserAborted or context cancel — exit cleanly.
-		return nil
+	).Run(); err != nil {
+		return nil, err
 	}
 
 	if len(selected) == 0 {
 		fmt.Fprintln(os.Stdout, ui.Dim.Render("No apps selected."))
-		return nil
 	}
+	return selected, nil
+}
 
-	// Build a map from name → App for quick URL lookup.
-	appByName := make(map[string]apps.App, len(selectable))
-	for _, app := range selectable {
-		appByName[app.Name] = app
+// indexByName builds a name → App map for quick lookup.
+func indexByName(list []apps.App) map[string]apps.App {
+	m := make(map[string]apps.App, len(list))
+	for _, a := range list {
+		m[a.Name] = a
 	}
+	return m
+}
 
-	// 6. Install selected apps sequentially.
-	fmt.Fprintln(os.Stdout)
+type installResult struct {
+	name string
+	err  error
+}
 
-	type result struct {
-		name string
-		err  error
-	}
-	results := make([]result, 0, len(selected))
-
-	for _, name := range selected {
-		app := appByName[name]
-
-		// get-app
-		var getErr error
-		spinErr := spinner.New().
-			Title(fmt.Sprintf("Downloading %s…", ui.AppName.Render(name))).
-			Action(func() { getErr = bench.GetApp(app.URL) }).
-			Run()
-		if spinErr != nil {
-			getErr = spinErr
-		}
-		if getErr != nil {
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n",
-				ui.Failure.Render("✗"),
-				ui.AppName.Render(name),
-				getErr,
-			)
-			results = append(results, result{name, getErr})
-			continue
-		}
-
-		// install-app
-		var installErr error
-		spinErr = spinner.New().
-			Title(fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(name), site)).
-			Action(func() { installErr = bench.InstallApp(site, name) }).
-			Run()
-		if spinErr != nil {
-			installErr = spinErr
-		}
-		if installErr != nil {
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n",
-				ui.Failure.Render("✗"),
-				ui.AppName.Render(name),
-				installErr,
-			)
-			results = append(results, result{name, installErr})
-			continue
-		}
-
-		fmt.Fprintf(os.Stdout, "%s %s\n",
-			ui.Success.Render("✓"),
-			ui.AppName.Render(name),
-		)
-		results = append(results, result{name, nil})
-	}
-
-	// 7. Summary.
+// printSummary prints the success/failure counts and any failed app names.
+func printSummary(results []installResult) {
 	fmt.Fprintln(os.Stdout)
 	successes, failures := 0, 0
 	for _, r := range results {
@@ -152,17 +230,14 @@ func runInstall() error {
 			failures++
 		}
 	}
-
 	if failures == 0 {
-		fmt.Fprintln(os.Stdout, ui.Success.Render(fmt.Sprintf("Done — %d app(s) installed successfully.", successes)))
+		fmt.Fprintln(os.Stdout, ui.Success.Render(fmt.Sprintf("Done — %d app(s) processed successfully.", successes)))
 	} else {
-		fmt.Fprintln(os.Stdout, ui.Bold.Render(fmt.Sprintf("%d installed, %d failed:", successes, failures)))
+		fmt.Fprintln(os.Stdout, ui.Bold.Render(fmt.Sprintf("%d succeeded, %d failed:", successes, failures)))
 		for _, r := range results {
 			if r.err != nil {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), r.name)
 			}
 		}
 	}
-
-	return nil
 }

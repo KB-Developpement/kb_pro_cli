@@ -32,31 +32,27 @@ You can uninstall an app from the site, remove its source from the bench, or do 
   Remove     — bench remove-app <app>                   (deletes source from apps folder)`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runManage()
+			if !bench.InBenchContainer() {
+				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
+			}
+			site, err := bench.DetectSiteName()
+			if err != nil {
+				return fmt.Errorf("could not detect site name: %w\nSet the active site with: bench use <site>", err)
+			}
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
+			return runManage(site)
 		},
 	}
 }
 
-func runManage() error {
-	// 1. Verify we're inside a bench container.
-	if !bench.InBenchContainer() {
-		return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
-	}
-
-	// 2. Detect site name.
-	site, err := bench.DetectSiteName()
-	if err != nil {
-		return fmt.Errorf("could not detect site name: %w\nSet the active site with: bench use <site>", err)
-	}
-	fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
-
-	// 3. Detect installed apps.
+func runManage(site string) error {
+	// 1. Detect installed apps.
 	installed, err := bench.DetectInstalledApps(site)
 	if err != nil {
 		return fmt.Errorf("could not detect installed apps: %w", err)
 	}
 
-	// 4. Filter registry to only installed KB apps.
+	// 2. Filter registry to only installed KB apps.
 	var manageable []apps.App
 	for _, app := range apps.All {
 		if installed[app.Name] {
@@ -69,7 +65,7 @@ func runManage() error {
 		return nil
 	}
 
-	// 5. Multi-select: which apps to manage.
+	// 3. Multi-select: which apps to manage.
 	options := make([]huh.Option[string], len(manageable))
 	for i, app := range manageable {
 		options[i] = huh.NewOption(app.Name, app.Name)
@@ -78,7 +74,7 @@ func runManage() error {
 	var selected []string
 	var action string
 
-	form := huh.NewForm(
+	if err := huh.NewForm(
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Select KB apps to manage").
@@ -97,9 +93,7 @@ func runManage() error {
 				).
 				Value(&action),
 		),
-	)
-
-	if err := form.Run(); err != nil {
+	).Run(); err != nil {
 		return nil
 	}
 
@@ -108,7 +102,7 @@ func runManage() error {
 		return nil
 	}
 
-	// 6. Confirm destructive action.
+	// 4. Confirm destructive action.
 	actionLabel := map[string]string{
 		actionUninstall:       "uninstall from site",
 		actionRemove:          "remove from bench",
@@ -116,105 +110,69 @@ func runManage() error {
 	}[action]
 
 	var confirmed bool
-	confirmForm := huh.NewForm(
+	if err := huh.NewForm(
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title(fmt.Sprintf("About to %s: %s", actionLabel, strings.Join(selected, ", "))).
 				Description("This cannot be undone. Continue?").
 				Value(&confirmed),
 		),
-	)
-	if err := confirmForm.Run(); err != nil || !confirmed {
+	).Run(); err != nil || !confirmed {
 		fmt.Fprintln(os.Stdout, ui.Dim.Render("Cancelled."))
 		return nil
 	}
 
-	// 7. Execute actions sequentially.
+	// 5. Execute actions sequentially.
 	fmt.Fprintln(os.Stdout)
 
-	type result struct {
-		name string
-		err  error
-	}
-	results := make([]result, 0, len(selected))
+	results := make([]installResult, 0, len(selected))
 
 	for _, name := range selected {
 		var opErr error
 
 		switch action {
 		case actionUninstall:
-			spinErr := spinner.New().
+			if spinErr := spinner.New().
 				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
 				Action(func() { opErr = bench.UninstallApp(site, name) }).
-				Run()
-			if spinErr != nil {
+				Run(); spinErr != nil {
 				opErr = spinErr
 			}
 
 		case actionRemove:
-			spinErr := spinner.New().
+			if spinErr := spinner.New().
 				Title(fmt.Sprintf("Removing %s from bench…", ui.AppName.Render(name))).
 				Action(func() { opErr = bench.RemoveApp(name) }).
-				Run()
-			if spinErr != nil {
+				Run(); spinErr != nil {
 				opErr = spinErr
 			}
 
 		case actionUninstallRemove:
-			spinErr := spinner.New().
+			if spinErr := spinner.New().
 				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
 				Action(func() { opErr = bench.UninstallApp(site, name) }).
-				Run()
-			if spinErr != nil {
+				Run(); spinErr != nil {
 				opErr = spinErr
 			}
 			if opErr == nil {
-				spinErr = spinner.New().
+				if spinErr := spinner.New().
 					Title(fmt.Sprintf("Removing %s from bench…", ui.AppName.Render(name))).
 					Action(func() { opErr = bench.RemoveApp(name) }).
-					Run()
-				if spinErr != nil {
+					Run(); spinErr != nil {
 					opErr = spinErr
 				}
 			}
 		}
 
 		if opErr != nil {
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n",
-				ui.Failure.Render("✗"),
-				ui.AppName.Render(name),
-				opErr,
-			)
+			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), opErr)
 		} else {
-			fmt.Fprintf(os.Stdout, "%s %s\n",
-				ui.Success.Render("✓"),
-				ui.AppName.Render(name),
-			)
+			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
 		}
-		results = append(results, result{name, opErr})
+		results = append(results, installResult{name, opErr})
 	}
 
-	// 8. Summary.
-	fmt.Fprintln(os.Stdout)
-	successes, failures := 0, 0
-	for _, r := range results {
-		if r.err == nil {
-			successes++
-		} else {
-			failures++
-		}
-	}
-
-	if failures == 0 {
-		fmt.Fprintln(os.Stdout, ui.Success.Render(fmt.Sprintf("Done — %d app(s) processed successfully.", successes)))
-	} else {
-		fmt.Fprintln(os.Stdout, ui.Bold.Render(fmt.Sprintf("%d succeeded, %d failed:", successes, failures)))
-		for _, r := range results {
-			if r.err != nil {
-				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), r.name)
-			}
-		}
-	}
-
+	// 6. Summary.
+	printSummary(results)
 	return nil
 }

@@ -1,11 +1,12 @@
-# kb — KB-Developpement Frappe App Installer
+# kb — KB-Developpement Frappe App Manager
 
-An interactive CLI that runs inside a Frappe bench container and lets you pick and install KB-Developpement custom apps in one command.
+An interactive CLI that runs inside a Frappe bench container and lets you install, add, and manage KB-Developpement custom apps.
 
 ## Requirements
 
 - A running Frappe bench managed by [ffm](https://github.com/nasroykh/foxmayn_frappe_manager)
 - Access to the bench container via `ffm shell`
+- A GitHub Personal Access Token with read access to KB-Developpement repos (for private repos)
 
 ## Installation
 
@@ -34,14 +35,46 @@ ffm shell <bench-name>
 kb
 ```
 
-`kb` will:
+`kb` shows an interactive main menu:
 
-1. Verify it is running inside a Frappe bench container
-2. Auto-detect the active site name
-3. Detect which KB apps are already installed and exclude them
-4. Show an interactive multi-select list of available apps
-5. Download and install each selected app sequentially with progress feedback
-6. Print a summary of successes and failures
+```
+KB — What would you like to do?
+  > Install apps          — download and install on this site
+    Add apps to bench     — download only, skip site install
+    Manage installed apps — uninstall or remove
+    Update kb             — check for a newer version
+```
+
+### Install apps
+
+Downloads (`bench get-app`) and installs (`bench install-app`) selected apps on the active site. Apps already installed on the site are excluded from the list.
+
+### Add apps to bench
+
+Downloads (`bench get-app`) selected apps into the bench `apps/` folder without installing them on any site. Useful when you want to stage apps before installing. Apps already present in the bench are excluded from the list.
+
+### Manage installed apps
+
+Select one or more installed KB apps and choose an action:
+
+| Action | What it does |
+|--------|-------------|
+| Uninstall from site | `bench uninstall-app` — removes from site, source stays in bench |
+| Remove from bench | `bench remove-app` — deletes source folder, keeps site data |
+| Uninstall + Remove | Both of the above in sequence |
+
+### GitHub Token (private repos)
+
+Most KB apps are in private GitHub repositories. `kb` will prompt for a Personal Access Token the first time it is needed and offer to save it to `~/.config/kb/github_token` (mode 0600).
+
+To skip the prompt, set the environment variable before running `kb`:
+
+```bash
+export KB_GITHUB_TOKEN=ghp_...
+kb
+```
+
+**Precedence:** `KB_GITHUB_TOKEN` env var > `~/.config/kb/github_token` file.
 
 ## Available apps
 
@@ -61,7 +94,8 @@ kb
 ## Commands
 
 ```
-kb                   Launch the interactive app installer
+kb                   Launch the interactive main menu
+kb manage            Directly open the manage menu (uninstall / remove)
 kb update            Check GitHub and update the binary in place
 kb update --check    Only check, do not install
 kb update --yes      Update without confirmation prompt

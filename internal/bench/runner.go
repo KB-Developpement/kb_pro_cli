@@ -2,14 +2,24 @@ package bench
 
 import (
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 )
 
 // GetApp runs "bench get-app <url>" inside the bench container.
+// If token is non-empty it is embedded in the URL as https://<token>@host/...
+// so that private repos clone without an interactive credential prompt.
 // It returns combined stdout+stderr on error for diagnostic purposes.
-func GetApp(url string) error {
-	out, err := runBench("get-app", url)
+func GetApp(rawURL, token string) error {
+	cloneURL := rawURL
+	if token != "" {
+		if u, err := url.Parse(rawURL); err == nil {
+			u.User = url.User(token)
+			cloneURL = u.String()
+		}
+	}
+	out, err := runBench("get-app", cloneURL)
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, out)
 	}

@@ -12,16 +12,16 @@ import (
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "kb",
-		Short: "KB-Developpement custom app installer for Frappe bench",
-		Long: `kb is an interactive installer for KB-Developpement custom Frappe apps.
+		Short: "KB-Developpement Frappe app manager",
+		Long: `kb is an interactive manager for KB-Developpement custom Frappe apps.
 
-Run inside a Frappe bench container (via ffm shell) to select and install
-apps from the KB-Developpement GitHub organisation.`,
+Run inside a Frappe bench container (via ffm shell) to install, add,
+or manage apps from the KB-Developpement GitHub organisation.`,
 		SilenceUsage: true,
 		Version: fmt.Sprintf("%s (commit %s, built %s)",
 			version.Version, version.Commit, version.Date),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInstall()
+			return runMainMenu()
 		},
 	}
 

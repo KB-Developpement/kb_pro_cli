@@ -51,6 +51,22 @@ func DetectSiteName() (string, error) {
 	}
 }
 
+// DetectAppsInBench returns a set of app names whose source folder exists under bench/apps/.
+// This reflects what has been downloaded via bench get-app, regardless of site installation.
+func DetectAppsInBench() map[string]bool {
+	entries, err := os.ReadDir(benchRoot + "/apps")
+	if err != nil {
+		return map[string]bool{}
+	}
+	result := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			result[e.Name()] = true
+		}
+	}
+	return result
+}
+
 // DetectInstalledApps returns a set of app names currently installed on the given site.
 // On failure it returns nil and the error — callers should treat nil as "unknown".
 func DetectInstalledApps(site string) (map[string]bool, error) {
