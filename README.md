@@ -9,21 +9,13 @@ An interactive CLI that runs inside a Frappe bench container and lets you pick a
 
 ## Installation
 
-### One-liner (inside the bench container)
+Run this from inside the bench container (`ffm shell <bench-name>`):
 
 ```sh
-ffm shell <bench-name>
 curl -fsSL https://raw.githubusercontent.com/KB-Developpement/kb_pro_cli/main/install.sh | sh
 ```
 
-If the repository is **private**, export your GitHub token first:
-
-```sh
-export GITHUB_TOKEN=ghp_...
-curl -fsSL https://raw.githubusercontent.com/KB-Developpement/kb_pro_cli/main/install.sh | sh
-```
-
-The script detects OS and architecture, downloads the latest release binary, verifies the SHA256 checksum, and installs to `/usr/local/bin` (or `~/.local/bin` if the former is not writable).
+Detects OS and architecture, downloads the latest release binary, verifies the SHA256 checksum, and installs to `/usr/local/bin` (or `~/.local/bin` if the former is not writable).
 
 ### Build from source
 
@@ -83,13 +75,6 @@ kb --help            Show help
 
 ```
 Update available: v0.1.0 → v0.2.0  (run: kb update)
-```
-
-For private repositories, set `GITHUB_TOKEN` before running `kb update`:
-
-```sh
-export GITHUB_TOKEN=ghp_...
-kb update
 ```
 
 ## Building from source
