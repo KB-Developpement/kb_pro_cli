@@ -3,6 +3,9 @@ package license
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -10,8 +13,22 @@ import (
 
 const defaultServerURL = "https://license.kb-developpement.com"
 
-// serverURL is the license server base URL. Can be overridden via KB_LICENSE_SERVER env var.
-var serverURL = defaultServerURL
+// resolveServerURL returns the license server base URL using the following precedence:
+//  1. KB_LICENSE_SERVER environment variable
+//  2. ~/.config/kb/license_server file
+//  3. defaultServerURL
+func resolveServerURL() string {
+	if v := os.Getenv("KB_LICENSE_SERVER"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	home, _ := os.UserHomeDir()
+	if data, err := os.ReadFile(filepath.Join(home, ".config", "kb", "license_server")); err == nil {
+		if s := strings.TrimSpace(string(data)); s != "" {
+			return strings.TrimRight(s, "/")
+		}
+	}
+	return defaultServerURL
+}
 
 // activateResponse is the JSON response from POST /activate.
 type activateResponse struct {
@@ -35,7 +52,7 @@ func newClient() *resty.Client {
 // Returns a user-friendly error message on non-200 responses.
 func Activate(serverBaseURL, licenseKey, fingerprint string) (string, error) {
 	if serverBaseURL == "" {
-		serverBaseURL = serverURL
+		serverBaseURL = resolveServerURL()
 	}
 
 	var resp activateResponse
@@ -85,7 +102,7 @@ type HeartbeatResult struct {
 // touching ErrCode — callers treat network errors as grace-period (leave cache intact).
 func Heartbeat(serverBaseURL, token, fingerprint string) HeartbeatResult {
 	if serverBaseURL == "" {
-		serverBaseURL = serverURL
+		serverBaseURL = resolveServerURL()
 	}
 
 	var resp activateResponse
