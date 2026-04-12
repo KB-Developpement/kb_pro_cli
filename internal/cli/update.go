@@ -17,6 +17,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/version"
 )
 
@@ -43,6 +44,8 @@ Examples:
   kb update --check   # Only check, do not install
   kb update --yes     # Update without asking for confirmation
 `,
+		// Still receives update check, but skips license check.
+		Annotations: map[string]string{"skipLicenseCheck": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runUpdate(checkOnly, yes)
 		},
@@ -58,6 +61,12 @@ func githubClient() *resty.Client {
 
 func runUpdate(checkOnly, yes bool) error {
 	current := version.Version
+
+	// License gate: downloading a new binary requires an active license.
+	// --check is always allowed (it's just a read operation).
+	if !checkOnly && !license.IsValid() {
+		return fmt.Errorf("active license required to update — run: kb activate")
+	}
 
 	var release githubRelease
 	var fetchErr error

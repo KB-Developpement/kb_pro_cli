@@ -11,6 +11,7 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
+	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
@@ -51,16 +52,24 @@ func resolveToken() string {
 // Only shows apps that are not yet in the bench and not installed on site.
 // Apps already downloaded (in bench) should be installed via "Manage".
 func runInstall(site string) error {
+	// License gate: must have an active license to install apps.
+	allowedSet := license.AllowedSet()
+	if allowedSet == nil {
+		return fmt.Errorf("license required to install apps — run: kb activate")
+	}
+
 	installed, detectErr := bench.DetectInstalledApps(site)
 	if detectErr != nil {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Warning: could not detect installed apps — all apps will be shown"))
 	}
 	inBench := bench.DetectAppsInBench()
 
-	var alreadyInstalled, alreadyDownloaded []string
+	var alreadyInstalled, alreadyDownloaded, notLicensed []string
 	var selectable []apps.App
 	for _, app := range apps.All {
 		switch {
+		case !allowedSet[app.Name]:
+			notLicensed = append(notLicensed, app.Name)
 		case installed[app.Name]:
 			alreadyInstalled = append(alreadyInstalled, app.Name)
 		case inBench[app.Name]:
@@ -70,6 +79,9 @@ func runInstall(site string) error {
 		}
 	}
 
+	if len(notLicensed) > 0 {
+		fmt.Fprintln(os.Stderr, ui.Dim.Render("Not in your license: "+strings.Join(notLicensed, ", ")))
+	}
 	if len(alreadyInstalled) > 0 {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already installed: "+strings.Join(alreadyInstalled, ", ")))
 	}
@@ -133,18 +145,30 @@ func runInstall(site string) error {
 // runAddToBench downloads selected apps into the bench apps folder without installing them on any site.
 // Skips apps whose source folder already exists in the bench.
 func runAddToBench() error {
+	// License gate.
+	allowedSet := license.AllowedSet()
+	if allowedSet == nil {
+		return fmt.Errorf("license required to download apps — run: kb activate")
+	}
+
 	inBench := bench.DetectAppsInBench()
 
-	var alreadyPresent []string
+	var alreadyPresent, notLicensed []string
 	var selectable []apps.App
 	for _, app := range apps.All {
-		if inBench[app.Name] {
+		switch {
+		case !allowedSet[app.Name]:
+			notLicensed = append(notLicensed, app.Name)
+		case inBench[app.Name]:
 			alreadyPresent = append(alreadyPresent, app.Name)
-		} else {
+		default:
 			selectable = append(selectable, app)
 		}
 	}
 
+	if len(notLicensed) > 0 {
+		fmt.Fprintln(os.Stderr, ui.Dim.Render("Not in your license: "+strings.Join(notLicensed, ", ")))
+	}
 	if len(alreadyPresent) > 0 {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already in bench: "+strings.Join(alreadyPresent, ", ")))
 	}

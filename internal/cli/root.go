@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/version"
 )
 
@@ -38,23 +39,29 @@ or manage apps from the KB-Developpement GitHub organisation.`,
 	root.SetVersionTemplate("kb {{.Version}}\n")
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		if cmd.Name() != "update" {
+		if cmd.Annotations["skipChecks"] != "true" {
 			runUpdateCheck()
+		}
+		if cmd.Annotations["skipChecks"] != "true" && cmd.Annotations["skipLicenseCheck"] != "true" {
+			license.RunCheck()
 		}
 		return nil
 	}
 
 	root.AddCommand(newUpdateCmd())
 	root.AddCommand(newManageCmd())
+	root.AddCommand(newActivateCmd())
+	root.AddCommand(newLicenseCmd())
 
 	return root
 }
 
-// Execute runs the root command and waits for any background update-check
-// goroutine to finish writing its state file before the process exits.
+// Execute runs the root command and waits for any background goroutines to
+// finish writing their state files before the process exits.
 func Execute() error {
 	err := newRootCmd().Execute()
 	waitForUpdateCheck()
+	license.WaitForCheck()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return err

@@ -11,6 +11,7 @@ import (
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
+	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
@@ -86,9 +87,15 @@ func runManage(site string, force bool) error {
 
 // runManageInstall installs already-downloaded apps onto the site.
 func runManageInstall(site string, installed, inBench map[string]bool) error {
+	// License gate: installing apps requires an active license.
+	allowedSet := license.AllowedSet()
+	if allowedSet == nil {
+		return fmt.Errorf("license required to install apps — run: kb activate")
+	}
+
 	var selectable []apps.App
 	for _, app := range apps.All {
-		if inBench[app.Name] && !installed[app.Name] {
+		if inBench[app.Name] && !installed[app.Name] && allowedSet[app.Name] {
 			selectable = append(selectable, app)
 		}
 	}
