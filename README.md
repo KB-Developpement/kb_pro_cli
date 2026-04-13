@@ -81,7 +81,7 @@ kb
 | App | Repository |
 |-----|-----------|
 | `kb_pro` | KB-Developpement/kb_pro |
-| `kb_compta_v2` | KB-Developpement/kb_compta_v2 |
+| `kb_compta` | KB-Developpement/kb_compta |
 | `kb_cheque` | KB-Developpement/kb_cheque |
 | `HR2025` | KB-Developpement/HR2025 |
 | `kb_facilite` | KB-Developpement/kb_facilite |

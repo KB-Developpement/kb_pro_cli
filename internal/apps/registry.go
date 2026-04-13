@@ -15,7 +15,7 @@ type App struct {
 // All is the list of KB-Developpement apps available for installation.
 var All = []App{
 	{Name: "kb_pro", URL: "https://github.com/KB-Developpement/kb_pro", Tier: "standard"},
-	{Name: "kb_compta_v2", URL: "https://github.com/KB-Developpement/kb_compta_v2", Tier: "standard"},
+	{Name: "kb_compta", URL: "https://github.com/KB-Developpement/kb_compta", Tier: "standard"},
 	{Name: "kb_cheque", URL: "https://github.com/KB-Developpement/kb_cheque", Tier: "standard"},
 	{Name: "kb_facilite", URL: "https://github.com/KB-Developpement/kb_facilite", Tier: "standard"},
 	{Name: "kb_print", URL: "https://github.com/KB-Developpement/kb_print", Tier: "standard"},
