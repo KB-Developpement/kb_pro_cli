@@ -124,6 +124,9 @@ func handleHeartbeatError(errCode string) {
 	case "activation_not_found":
 		deleteCache()
 		fmt.Fprintln(os.Stderr, "warning: activation not found on server — run: kb activate")
+	case "machine_banned":
+		deleteCache()
+		fmt.Fprintln(os.Stderr, "warning: this machine has been banned — contact KB-Developpement")
 	default:
 		// Unknown error — leave cache intact for grace period.
 	}

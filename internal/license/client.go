@@ -81,6 +81,8 @@ func Activate(serverBaseURL, licenseKey, fingerprint string) (string, error) {
 			return "", fmt.Errorf("license key has been revoked — contact KB-Developpement")
 		case "contract_expired":
 			return "", fmt.Errorf("support contract has expired — contact KB-Developpement")
+		case "machine_banned":
+			return "", fmt.Errorf("this machine has been banned — contact KB-Developpement")
 		}
 		return "", fmt.Errorf("activation denied: %s", apiErr.Error)
 	case http.StatusConflict:
