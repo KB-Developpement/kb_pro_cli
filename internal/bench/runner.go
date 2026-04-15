@@ -68,6 +68,15 @@ func RemoveApp(ctx context.Context, appName string) (string, error) {
 	return runBench(ctx, "remove-app", appName)
 }
 
+// UpdateApp runs "bench update --apps <appName> --reset".
+// --reset performs a git reset --hard to the upstream branch (required for shallow clones).
+// This is a long-running operation: it pulls code, updates requirements, migrates all
+// sites, rebuilds JS/CSS assets, and compiles translations. Run sequentially — never
+// concurrently — as migrations and builds are bench-wide operations.
+func UpdateApp(ctx context.Context, appName string) (string, error) {
+	return runBench(ctx, "update", "--apps", appName, "--reset")
+}
+
 // runBench executes a bench command from the bench root and returns combined output.
 func runBench(ctx context.Context, args ...string) (string, error) {
 	return runBenchWithEnv(ctx, nil, args...)

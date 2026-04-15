@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -45,7 +46,7 @@ func runLicenseMenu() {
 
 		switch action {
 		case licMenuStatus:
-			_ = runLicenseStatus()
+			_ = runLicenseStatus(context.Background())
 			pause()
 
 		case licMenuActivate:

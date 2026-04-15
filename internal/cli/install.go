@@ -184,6 +184,9 @@ func promptOptionalGitBranch() (string, error) {
 // preselected, when non-nil, bypasses the interactive selector (used by cobra command / --no-input).
 // branchFlag is used as-is when non-empty; otherwise an interactive user is prompted once.
 func runInstall(ctx context.Context, site string, preselected []string, branchFlag string) error {
+	if err := license.RunSyncCheck(ctx); err != nil {
+		return err
+	}
 	allowedSet := license.AllowedSet()
 	if allowedSet == nil {
 		return fmt.Errorf("license required to install apps — run: kb activate")
@@ -340,6 +343,9 @@ func runInstall(ctx context.Context, site string, preselected []string, branchFl
 // preselected, when non-nil, bypasses the interactive selector.
 // branchFlag is used when non-empty; otherwise an interactive user is prompted once.
 func runAddToBench(ctx context.Context, preselected []string, branchFlag string) error {
+	if err := license.RunSyncCheck(ctx); err != nil {
+		return err
+	}
 	allowedSet := license.AllowedSet()
 	if allowedSet == nil {
 		return fmt.Errorf("license required to download apps — run: kb activate")

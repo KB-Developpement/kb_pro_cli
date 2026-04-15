@@ -42,7 +42,7 @@ or manage apps from the KB-Developpement GitHub organisation.`,
 	// Persistent flags available on every subcommand.
 	root.PersistentFlags().BoolVar(&globalFlags.NoInput, "no-input", false, "Disable interactive prompts (requires explicit flags for inputs)")
 	root.PersistentFlags().BoolVarP(&globalFlags.Quiet, "quiet", "q", false, "Suppress informational output")
-	root.PersistentFlags().BoolVarP(&globalFlags.Verbose, "verbose", "v", false, "Print verbose output including raw bench output on success")
+	root.PersistentFlags().BoolVar(&globalFlags.Verbose, "verbose", false, "Print verbose output including raw bench output on success")
 	root.PersistentFlags().BoolVar(&globalFlags.NoColor, "no-color", false, "Disable colours in output (also honoured via NO_COLOR env var)")
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
@@ -62,6 +62,7 @@ or manage apps from the KB-Developpement GitHub organisation.`,
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newAddCmd())
+	root.AddCommand(newUpgradeCmd())
 	root.AddCommand(newUpdateCmd())
 	root.AddCommand(newManageCmd())
 	root.AddCommand(newActivateCmd())

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -52,7 +53,7 @@ Examples:
 			if globalFlags.NoInput {
 				yes = true
 			}
-			return runUpdate(checkOnly, yes)
+			return runUpdate(cmd.Context(), checkOnly, yes)
 		},
 	}
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "Only check for updates, do not install")
@@ -63,13 +64,21 @@ Examples:
 // githubHTTPClient is a shared resty client for GitHub API and release downloads.
 var githubHTTPClient = resty.New().SetHeader("Accept", "application/vnd.github+json")
 
-func runUpdate(checkOnly, yes bool) error {
+func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 	current := version.Version
 
 	// License gate: downloading a new binary requires an active license.
 	// --check is always allowed (it's just a read operation).
-	if !checkOnly && !license.IsValid() {
-		return fmt.Errorf("active license required to update — run: kb activate")
+	// RunCheck populates cachedState from disk since kb update skips the
+	// license check in PersistentPreRunE (skipLicenseCheck annotation).
+	if !checkOnly {
+		license.RunCheck()
+		if err := license.RunSyncCheck(ctx); err != nil {
+			return err
+		}
+		if !license.IsValid() {
+			return fmt.Errorf("active license required to update — run: kb activate")
+		}
 	}
 
 	var release githubRelease

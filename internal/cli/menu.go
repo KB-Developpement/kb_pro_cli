@@ -18,7 +18,7 @@ const (
 	menuInstall  = "install"
 	menuAdd      = "add"
 	menuManage   = "manage"
-	menuUpdate   = "update"
+	menuUpgrade  = "upgrade"
 	menuLicense  = "license"
 	menuSettings = "settings"
 )
@@ -77,7 +77,7 @@ func runMainMenu() error {
 						huh.NewOption("Install apps          — download and install on this site", menuInstall),
 						huh.NewOption("Add apps to bench     — download only, skip site install", menuAdd),
 						huh.NewOption("Manage apps           — install downloaded / uninstall / remove", menuManage),
-						huh.NewOption("Update kb             — check for a newer version", menuUpdate),
+						huh.NewOption("Upgrade apps          — pull latest changes and migrate", menuUpgrade),
 						huh.NewOption("License               — status, activate, deactivate locally", menuLicense),
 						huh.NewOption("Settings              — license server URL, GitHub token", menuSettings),
 					).
@@ -87,7 +87,9 @@ func runMainMenu() error {
 			return nil // Esc / Ctrl+C — exit to shell
 		}
 
-		// Each action gets a fresh 10-minute operation context.
+		// Each action gets a fresh operation context.
+		// Upgrade gets its own long-lived context since bench update can take many
+		// minutes per app; per-app timeouts inside runUpgrade handle the granularity.
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		var actionErr error
 		switch choice {
@@ -97,8 +99,9 @@ func runMainMenu() error {
 			actionErr = runAddToBench(ctx, nil, "")
 		case menuManage:
 			actionErr = runManage(ctx, site, false)
-		case menuUpdate:
-			actionErr = runUpdate(false, false)
+		case menuUpgrade:
+			cancel() // release the 10-min context; upgrade manages its own per-app timeouts
+			actionErr = runUpgrade(context.Background(), nil)
 		case menuLicense:
 			runLicenseMenu()
 		case menuSettings:

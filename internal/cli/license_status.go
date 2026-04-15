@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -20,15 +21,19 @@ func newLicenseCmd() *cobra.Command {
 		// Skip both update check and license check — this is meta-information about the license itself.
 		Annotations: map[string]string{"skipChecks": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLicenseStatus()
+			return runLicenseStatus(cmd.Context())
 		},
 	}
 	return cmd
 }
 
-func runLicenseStatus() error {
-	// Run a synchronous check so we have fresh state.
+func runLicenseStatus(ctx context.Context) error {
+	// Populate cachedState from disk first.
 	license.RunCheck()
+	// Then hit the server to apply any revocations or bans before displaying.
+	// Network errors are silently ignored (grace period); server rejections
+	// update cachedState to nil via handleHeartbeatError.
+	_ = license.RunSyncCheck(ctx)
 
 	state := license.CurrentState()
 	if state == nil {

@@ -1,6 +1,7 @@
 package license
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -91,7 +92,9 @@ type HeartbeatResult struct {
 
 // Heartbeat refreshes the JWT. Network errors return HeartbeatResult.Err without
 // touching ErrCode — callers treat network errors as grace-period (leave cache intact).
-func Heartbeat(serverBaseURL, token, fingerprint string) HeartbeatResult {
+// Pass ctx to enforce a deadline (e.g. 5s for synchronous checks); use context.Background()
+// for background goroutines where the existing client timeout (15s) is sufficient.
+func Heartbeat(ctx context.Context, serverBaseURL, token, fingerprint string) HeartbeatResult {
 	if serverBaseURL == "" {
 		serverBaseURL = resolveServerURL()
 	}
@@ -100,6 +103,7 @@ func Heartbeat(serverBaseURL, token, fingerprint string) HeartbeatResult {
 	var apiErr apiError
 
 	r, err := httpClient.R().
+		SetContext(ctx).
 		SetBody(map[string]string{
 			"token":       token,
 			"fingerprint": fingerprint,
