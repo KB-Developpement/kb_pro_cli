@@ -13,6 +13,7 @@ import (
 
 const (
 	licenseCacheFile = "license.json"
+	licenseJWTFile   = "license.jwt"
 	licenseKeyFile   = "license_key"
 )
 
@@ -40,7 +41,8 @@ func loadCache() (*cacheEntry, error) {
 	return &e, nil
 }
 
-// saveCache writes the license cache to disk with 0600 permissions.
+// saveCache writes the license cache to disk with 0600 permissions
+// and mirrors the raw JWT to license.jwt for consumption by kb_pro (Frappe app).
 func saveCache(e *cacheEntry) error {
 	data, err := json.Marshal(e)
 	if err != nil {
@@ -53,12 +55,16 @@ func saveCache(e *cacheEntry) error {
 	if err := os.WriteFile(cachePath(), data, 0600); err != nil {
 		return fmt.Errorf("write license cache: %w", err)
 	}
+	if err := os.WriteFile(jwtPath(), []byte(e.Token+"\n"), 0600); err != nil {
+		return fmt.Errorf("write license jwt: %w", err)
+	}
 	return nil
 }
 
-// deleteCache removes the license cache file.
+// deleteCache removes the license cache file and the raw JWT file.
 func deleteCache() {
 	_ = os.Remove(cachePath())
+	_ = os.Remove(jwtPath())
 }
 
 // LoadLicenseKey reads the stored license key from ~/.config/kb/license_key.
@@ -96,6 +102,10 @@ func SaveTokenCache(token string, activatedAt time.Time) error {
 
 func cachePath() string {
 	return filepath.Join(config.ConfigDir(), licenseCacheFile)
+}
+
+func jwtPath() string {
+	return filepath.Join(config.ConfigDir(), licenseJWTFile)
 }
 
 func keyPath() string {
