@@ -95,3 +95,26 @@ func TestLoadLicenseKey_Missing(t *testing.T) {
 		t.Errorf("expected empty for missing key file, got %q", got)
 	}
 }
+
+func TestClearLocalLicense(t *testing.T) {
+	withTempConfigDir(t)
+	if err := saveCache(&cacheEntry{Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveLicenseKey("k1"); err != nil {
+		t.Fatal(err)
+	}
+	ClearLocalLicense()
+	if _, err := os.Stat(cachePath()); !os.IsNotExist(err) {
+		t.Errorf("cache file: stat err=%v", err)
+	}
+	if _, err := os.Stat(jwtPath()); !os.IsNotExist(err) {
+		t.Errorf("jwt file: stat err=%v", err)
+	}
+	if _, err := os.Stat(keyPath()); !os.IsNotExist(err) {
+		t.Errorf("key file: stat err=%v", err)
+	}
+	if LoadLicenseKey() != "" {
+		t.Error("LoadLicenseKey: want empty after ClearLocalLicense")
+	}
+}

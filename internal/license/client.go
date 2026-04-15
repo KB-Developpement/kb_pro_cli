@@ -3,31 +3,16 @@ package license
 import (
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+
+	"github.com/KB-Developpement/kb_pro_cli/internal/config"
 )
 
-const defaultServerURL = "https://license.kb-developpement.com"
-
-// resolveServerURL returns the license server base URL using the following precedence:
-//  1. KB_LICENSE_SERVER environment variable
-//  2. ~/.config/kb/license_server file
-//  3. defaultServerURL
+// resolveServerURL returns the license server base URL (see config.ResolveLicenseServerURL).
 func resolveServerURL() string {
-	if v := os.Getenv("KB_LICENSE_SERVER"); v != "" {
-		return strings.TrimRight(v, "/")
-	}
-	home, _ := os.UserHomeDir()
-	if data, err := os.ReadFile(filepath.Join(home, ".config", "kb", "license_server")); err == nil {
-		if s := strings.TrimSpace(string(data)); s != "" {
-			return strings.TrimRight(s, "/")
-		}
-	}
-	return defaultServerURL
+	return config.ResolveLicenseServerURL()
 }
 
 // activateResponse is the JSON response from POST /activate.

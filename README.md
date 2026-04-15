@@ -1,6 +1,6 @@
 # kb — KB-Developpement Frappe App Manager
 
-An interactive CLI that runs inside a Frappe bench container and lets you install, add, and manage KB-Developpement custom apps.
+An interactive CLI for installing, managing, and licensing KB-Developpement Frappe apps. Setup commands (**`kb init`**, **`kb config`**) work from any machine and store settings in `~/.config/kb`; bench commands (**`kb`**, **`kb install`**, **`kb add`**, **`kb manage`**) require a Frappe bench container (`ffm shell`).
 
 ## Requirements
 
@@ -28,14 +28,29 @@ make build   # → bin/kb (linux/amd64)
 
 ## Usage
 
-Open a shell in your bench container and run `kb`:
+### First-time setup
+
+Persistent settings live in **`~/.config/kb/config.json`** (mode `0600`). The first time you run **`kb`** with no arguments, or the first time you run **`kb install`**, **`kb add`**, or **`kb manage`** in an interactive terminal, an **init wizard** asks for:
+
+- **License server URL** — base URL for activation and heartbeat (defaults to the production server).
+- **GitHub Personal Access Token** — optional; leave empty if you only use public flows. Required for private KB repos when cloning.
+
+You can run the same wizard anytime with **`kb init`**, or edit values with **`kb config`** (also under **Settings** in the main menu). **`kb init`** and **`kb config`** do **not** require a bench container — only the interactive **`kb`** menu and the **`install` / `add` / `manage`** commands need `ffm shell` and a detected site.
+
+If you cancel the wizard before saving, the bare **`kb`** menu does not open until setup is complete.
+
+**`kb activate`**, **`kb license`**, and **`kb update --check`** do **not** require `config.json`. Activation uses the stored license server URL (or the built-in default) unless you set **`KB_LICENSE_SERVER`**.
+
+### Main menu (inside the bench)
+
+Open a shell in your bench container and run **`kb`**:
 
 ```bash
 ffm shell <bench-name>
 kb
 ```
 
-`kb` shows an interactive main menu. After each action you are returned to the menu — press `Esc` or `Ctrl+C` to exit to the shell.
+The main menu lists every top-level action. After each action you return here — press **`Esc`** or **`Ctrl+C`** to exit to the shell. Nested menus (**Manage**, **License**) use the same keys to go back.
 
 ```
 KB — What would you like to do?
@@ -43,15 +58,21 @@ KB — What would you like to do?
     Add apps to bench     — download only, skip site install
     Manage apps           — install downloaded / uninstall / remove
     Update kb             — check for a newer version
+    License               — status, activate, deactivate locally
+    Settings              — license server URL, GitHub token
 ```
 
 ### Install apps
 
 Downloads (`bench get-app`) all selected apps in parallel (up to 3 concurrent), then installs each one (`bench install-app`) sequentially on the active site. Apps already installed on the site or already present in the bench are excluded from the list.
 
+After you pick apps (interactive flow), **`kb`** asks once for an optional **Git branch** — passed as `bench get-app … --branch <name>` for every app in that run. Leave it empty to use each repository’s default branch. From the shell, use **`kb install --branch <name>`** (with or without **`--apps`**) instead of the prompt.
+
 ### Add apps to bench
 
 Downloads (`bench get-app`) selected apps into the bench `apps/` folder in parallel without installing them on any site. Useful when you want to stage apps before installing. Apps already present in the bench are excluded.
+
+The same optional **Git branch** step (or **`kb add --branch <name>`**) applies as for **Install apps**.
 
 ### Manage apps
 
@@ -65,25 +86,42 @@ Select one of three actions:
 
 ### License
 
-```bash
-kb activate          # Activate this machine with a KB Pro license key
-kb license           # Show current license status (tier, expiry, allowed apps)
-```
+From the main menu, **License** opens a submenu where you can:
 
-### GitHub Token (private repos)
+- **View status** — same output as **`kb license`** (tier, expiry, allowed apps; reads/refreshes cached JWT state).
+- **Activate / reactivate** — same flow as **`kb activate`** (saved key, interactive prompt, or paste a new key).
+- **Deactivate locally** — after confirmation, deletes **`~/.config/kb/license.json`**, **`license.jwt`**, and **`license_key`**. The license server is not contacted; an activation may still count on the server until removed there. There is no separate **`kb deactivate`** subcommand — use this menu action or delete those files manually.
 
-Most KB apps are in private GitHub repositories. `kb` will prompt for a Personal Access Token the first time it is needed and offer to save it to `~/.config/kb/github_token` (mode 0600). The token is never passed via process arguments — it is written to a temporary 0600 credentials file for `git` and deleted immediately after the clone.
-
-To skip the prompt, set the environment variable before running `kb`:
+Equivalent shell commands:
 
 ```bash
-export KB_GITHUB_TOKEN=ghp_...
-kb
+kb activate [license-key]   # Activate; optional key argument skips the prompt
+kb license                  # Print current license status from cache
 ```
 
-**Precedence:** `KB_GITHUB_TOKEN` env var > `~/.config/kb/github_token` file.
+### Configuration & credentials
 
-A warning is printed if the token does not start with `ghp_` or `github_pat_`.
+`~/.config/kb/config.json` stores:
+
+| Field | Meaning |
+|-------|---------|
+| `license_server_url` | Base URL for license activation and heartbeat (no trailing path). |
+| `github_token` | GitHub PAT for `bench get-app` against private KB repos (optional). |
+
+**License server URL — precedence (highest wins):**
+
+1. `KB_LICENSE_SERVER` environment variable  
+2. `license_server_url` in `config.json`  
+3. Built-in default: `https://license.kbdev.co`
+
+**GitHub token — precedence (highest wins):**
+
+1. `KB_GITHUB_TOKEN` environment variable  
+2. `github_token` in `config.json`
+
+Most KB apps are in private GitHub repositories. During **`kb install`** / **`kb add`**, if no token is available from env or `config.json`, `kb` prompts once and can save it into `config.json` alongside any existing settings. The token is never passed via process arguments to `git` — it is written to a temporary `0600` credentials file and removed after the clone.
+
+A warning is printed if a supplied token does not start with `ghp_` or `github_pat_`.
 
 ## Available apps
 
@@ -102,18 +140,22 @@ A warning is printed if the token does not start with `ghp_` or `github_pat_`.
 
 ## Commands
 
-All subcommands accept the global flags listed below.
+All subcommands accept the global flags listed below unless noted.
 
 ```
-kb                         Launch the interactive main menu
-kb install  (alias: i)     Download and install apps on this site
-kb add                     Download apps into bench without site installation
-kb manage   (alias: m)     Open the manage submenu
+kb                         Interactive main menu (init wizard if ~/.config/kb/config.json is missing)
+kb init                    First-time setup wizard — same fields as Settings (TTY; no --no-input)
+kb config                  Edit ~/.config/kb/config.json interactively (TTY; no --no-input)
+kb install  (alias: i)     Download and install apps on this site (--apps, --branch)
+kb add                     Download apps into bench without site installation (--apps, --branch)
+kb manage   (alias: m)     Interactive manage submenu (install on site / uninstall / remove)
 kb activate (alias: a)     Activate this machine with a KB Pro license key
-kb license                 Show current license status
-kb update   (alias: u)     Check GitHub and update the binary in place
+kb license                 Show current license status (from cache)
+kb update   (alias: u)     Check GitHub and optionally replace the kb binary (see Self-update)
 kb completion <shell>      Print shell completion script (bash, zsh, fish, powershell)
 ```
+
+License **deactivate** (remove local JWT + key files) is available from the main menu under **License**, not as a separate `kb` subcommand.
 
 ### Global flags
 
@@ -128,13 +170,28 @@ kb completion <shell>      Print shell completion script (bash, zsh, fish, power
 
 ### Non-interactive / CI usage
 
-Use `--no-input` with explicit `--apps` to run without any prompts:
+**`kb init`** and **`kb config`** require a TTY and cannot be used with **`--no-input`**.
+
+**`kb install`**, **`kb add`**, and **`kb manage`** require **`~/.config/kb/config.json`** to exist when you use **`--no-input`** (the file marks “setup complete”). Create it once on the image or runner (for example by copying from a template machine). An empty object `{}` is valid if you supply everything at runtime via **`KB_GITHUB_TOKEN`** and **`KB_LICENSE_SERVER`**.
+
+Example `config.json` with stored credentials (typical for CI):
+
+```json
+{
+  "license_server_url": "https://license.kbdev.co",
+  "github_token": "ghp_your_token_here"
+}
+```
+
+Use **`--no-input`** with explicit **`--apps`** where applicable:
 
 ```bash
 kb install --no-input --apps kb_pro,kb_compta
+kb install --no-input --apps kb_pro --branch develop
 kb add     --no-input --apps kb_cheque
+kb add     --no-input --apps kb_pro --branch version-15
 kb activate <license-key>          # key as argument, no prompt
-kb update  --no-input --yes        # or just --no-input (implies --yes)
+kb update  --no-input --yes          # or just --no-input (implies --yes)
 ```
 
 ### Shell completion
@@ -147,17 +204,19 @@ kb completion fish   >  ~/.config/fish/completions/kb.fish
 
 ### Self-update
 
-`kb` checks for a newer release in the background on every invocation (results cached for 24 hours). When an update is available it prints a one-line notice to stderr:
+When the startup hooks run (skipped for example on **`kb activate`**, **`kb init`**, **`kb config`**, **`kb completion`**, and **`kb license`**), `kb` may fetch the latest release in the background; results are cached for 24 hours. When an update is available it prints a one-line notice to stderr:
 
 ```
 Update available: v0.1.0 → v0.2.0  (run: kb update)
 ```
 
 ```bash
-kb update           # Check and update (asks for confirmation)
-kb update --check   # Only check, do not install
-kb update --yes     # Update without confirmation prompt
+kb update           # Download and replace the binary (asks for confirmation; needs active license)
+kb update --check   # Only check — no license required, does not install
+kb update --yes     # Update without confirmation (--no-input implies --yes)
 ```
+
+Installing a new binary with **`kb update`** (without **`--check`**) requires an **active, non-expired license** (`kb activate`). Checking only (`--check`) does not.
 
 ## Building from source
 

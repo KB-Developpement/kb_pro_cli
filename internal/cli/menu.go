@@ -10,14 +10,17 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
+	"github.com/KB-Developpement/kb_pro_cli/internal/config"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
 const (
-	menuInstall = "install"
-	menuAdd     = "add"
-	menuManage  = "manage"
-	menuUpdate  = "update"
+	menuInstall  = "install"
+	menuAdd      = "add"
+	menuManage   = "manage"
+	menuUpdate   = "update"
+	menuLicense  = "license"
+	menuSettings = "settings"
 )
 
 // clearScreen writes the standard ANSI escape sequence to clear the terminal.
@@ -41,6 +44,11 @@ func pause() {
 }
 
 func runMainMenu() error {
+	ensureFirstRunSetup()
+	if !config.IsInitialized() {
+		return nil
+	}
+
 	if !bench.InBenchContainer() {
 		return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 	}
@@ -70,6 +78,8 @@ func runMainMenu() error {
 						huh.NewOption("Add apps to bench     — download only, skip site install", menuAdd),
 						huh.NewOption("Manage apps           — install downloaded / uninstall / remove", menuManage),
 						huh.NewOption("Update kb             — check for a newer version", menuUpdate),
+						huh.NewOption("License               — status, activate, deactivate locally", menuLicense),
+						huh.NewOption("Settings              — license server URL, GitHub token", menuSettings),
 					).
 					Value(&choice),
 			),
@@ -82,13 +92,17 @@ func runMainMenu() error {
 		var actionErr error
 		switch choice {
 		case menuInstall:
-			actionErr = runInstall(ctx, site, nil)
+			actionErr = runInstall(ctx, site, nil, "")
 		case menuAdd:
-			actionErr = runAddToBench(ctx, nil)
+			actionErr = runAddToBench(ctx, nil, "")
 		case menuManage:
 			actionErr = runManage(ctx, site, false)
 		case menuUpdate:
 			actionErr = runUpdate(false, false)
+		case menuLicense:
+			runLicenseMenu()
+		case menuSettings:
+			runConfigEdit()
 		}
 		cancel()
 

@@ -67,6 +67,14 @@ func deleteCache() {
 	_ = os.Remove(jwtPath())
 }
 
+// ClearLocalLicense removes the JWT cache, mirrored license.jwt, and the
+// stored license key file under ~/.config/kb. It does not call the license
+// server; the activation may still count on the server until removed there.
+func ClearLocalLicense() {
+	deleteCache()
+	_ = os.Remove(keyPath())
+}
+
 // LoadLicenseKey reads the stored license key from ~/.config/kb/license_key.
 // Returns empty string if not found.
 func LoadLicenseKey() string {

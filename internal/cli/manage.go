@@ -37,6 +37,9 @@ func newManageCmd() *cobra.Command {
   Remove     — uninstall if needed, then bench remove-app <app>  (deletes source)`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireInitializedForCLI(); err != nil {
+				return err
+			}
 			if !bench.InBenchContainer() {
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}

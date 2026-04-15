@@ -38,10 +38,12 @@ func RunCheck() {
 	if err != nil {
 		// Corrupted cache — delete and treat as unlicensed.
 		deleteCache()
+		cachedState.Store(nil)
 		return
 	}
 	if entry == nil {
 		// No license file — unlicensed.
+		cachedState.Store(nil)
 		return
 	}
 
@@ -49,6 +51,7 @@ func RunCheck() {
 	if err != nil {
 		// Invalid token (wrong key, malformed) — delete corrupt cache.
 		deleteCache()
+		cachedState.Store(nil)
 		return
 	}
 
@@ -114,18 +117,23 @@ func handleHeartbeatError(errCode string) {
 	switch errCode {
 	case "contract_expired":
 		deleteCache()
+		cachedState.Store(nil)
 		fmt.Fprintln(os.Stderr, "warning: support contract has expired — contact KB-Developpement to renew")
 	case "license_revoked":
 		deleteCache()
+		cachedState.Store(nil)
 		fmt.Fprintln(os.Stderr, "warning: license has been revoked — contact KB-Developpement")
 	case "fingerprint_mismatch":
 		deleteCache()
+		cachedState.Store(nil)
 		fmt.Fprintln(os.Stderr, "warning: machine fingerprint changed — run: kb activate")
 	case "activation_not_found":
 		deleteCache()
+		cachedState.Store(nil)
 		fmt.Fprintln(os.Stderr, "warning: activation not found on server — run: kb activate")
 	case "machine_banned":
 		deleteCache()
+		cachedState.Store(nil)
 		fmt.Fprintln(os.Stderr, "warning: this machine has been banned — contact KB-Developpement")
 	default:
 		// Unknown error — leave cache intact for grace period.

@@ -58,6 +58,8 @@ or manage apps from the KB-Developpement GitHub organisation.`,
 		return nil
 	}
 
+	root.AddCommand(newInitCmd())
+	root.AddCommand(newConfigCmd())
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newAddCmd())
 	root.AddCommand(newUpdateCmd())
@@ -67,6 +69,44 @@ or manage apps from the KB-Developpement GitHub organisation.`,
 	root.AddCommand(newCompletionCmd())
 
 	return root
+}
+
+func newInitCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "First-time setup wizard (license server URL, GitHub token)",
+		Annotations: map[string]string{
+			"skipChecks":       "true",
+			"skipLicenseCheck": "true",
+		},
+		SilenceUsage: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if globalFlags.NoInput {
+				return fmt.Errorf("kb init cannot run with --no-input")
+			}
+			runInit()
+			return nil
+		},
+	}
+}
+
+func newConfigCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "config",
+		Short: "Edit stored configuration",
+		Annotations: map[string]string{
+			"skipChecks":       "true",
+			"skipLicenseCheck": "true",
+		},
+		SilenceUsage: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if globalFlags.NoInput {
+				return fmt.Errorf("kb config cannot run with --no-input")
+			}
+			runConfigEdit()
+			return nil
+		},
+	}
 }
 
 // newCompletionCmd returns a subcommand that generates shell completion scripts.

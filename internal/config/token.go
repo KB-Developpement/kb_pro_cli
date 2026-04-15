@@ -2,31 +2,29 @@ package config
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 )
 
-const tokenFile = "github_token"
-
 // LoadToken returns the GitHub personal access token.
-// KB_GITHUB_TOKEN env var takes precedence over the file at ~/.config/kb/github_token.
-// Returns an empty string if neither is set.
+// Precedence: KB_GITHUB_TOKEN env → github_token in ~/.config/kb/config.json.
+// Returns an empty string if none is set.
 func LoadToken() string {
 	if v := os.Getenv("KB_GITHUB_TOKEN"); v != "" {
 		return strings.TrimSpace(v)
 	}
-	data, err := os.ReadFile(filepath.Join(ConfigDir(), tokenFile))
-	if err != nil {
-		return ""
+	s, err := LoadStoredSettings()
+	if err == nil && strings.TrimSpace(s.GitHubToken) != "" {
+		return strings.TrimSpace(s.GitHubToken)
 	}
-	return strings.TrimSpace(string(data))
+	return ""
 }
 
-// SaveToken writes the token to ~/.config/kb/github_token (mode 0600).
+// SaveToken persists the token into config.json (merging with existing stored settings).
 func SaveToken(token string) error {
-	dir := ConfigDir()
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	s, err := LoadStoredSettings()
+	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, tokenFile), []byte(token+"\n"), 0600)
+	s.GitHubToken = strings.TrimSpace(token)
+	return SaveStoredSettings(s)
 }

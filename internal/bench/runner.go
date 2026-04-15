@@ -9,11 +9,12 @@ import (
 	"strings"
 )
 
-// GetApp runs "bench get-app <url>" inside the bench container.
+// GetApp runs "bench get-app <url> [--branch <name>]" inside the bench container.
+// If branch is non-empty after trimming, "--branch" is passed to bench get-app.
 // If token is non-empty, credentials are supplied via a temporary git-credentials
 // file (mode 0600) to avoid exposing the token in process arguments.
 // Returns combined stdout+stderr and any error.
-func GetApp(ctx context.Context, rawURL, token string) (string, error) {
+func GetApp(ctx context.Context, rawURL, token, branch string) (string, error) {
 	cloneURL := rawURL
 	var extraEnv []string
 	var cleanup func()
@@ -39,7 +40,11 @@ func GetApp(ctx context.Context, rawURL, token string) (string, error) {
 		defer cleanup()
 	}
 
-	return runBenchWithEnv(ctx, extraEnv, "get-app", cloneURL)
+	args := []string{"get-app", cloneURL}
+	if b := strings.TrimSpace(branch); b != "" {
+		args = append(args, "--branch", b)
+	}
+	return runBenchWithEnv(ctx, extraEnv, args...)
 }
 
 // InstallApp runs "bench --site <site> install-app <appName> --force".

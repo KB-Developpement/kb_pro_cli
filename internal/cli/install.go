@@ -23,7 +23,7 @@ import (
 // newInstallCmd returns the "install" subcommand which downloads and installs
 // selected KB apps on the active Frappe site.
 func newInstallCmd() *cobra.Command {
-	var appsFlag string
+	var appsFlag, branchFlag string
 
 	cmd := &cobra.Command{
 		Use:     "install",
@@ -35,9 +35,13 @@ Examples:
   kb install                           # Interactive — pick apps from a menu
   kb install --apps kb_app,other_app   # Non-interactive install
   kb install --no-input --apps kb_app  # Scripted / CI usage
+  kb install --branch develop --apps kb_pro   # Non-interactive branch
 `,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireInitializedForCLI(); err != nil {
+				return err
+			}
 			if !bench.InBenchContainer() {
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}
@@ -49,18 +53,19 @@ Examples:
 				fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
 			}
 			preselected := parseAppsFlag(appsFlag)
-			return runInstall(cmd.Context(), site, preselected)
+			return runInstall(cmd.Context(), site, preselected, branchFlag)
 		},
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
+	cmd.Flags().StringVar(&branchFlag, "branch", "", "Git branch passed to bench get-app for each selected app (optional)")
 	return cmd
 }
 
 // newAddCmd returns the "add" subcommand which downloads KB apps into the bench
 // without installing them on any site.
 func newAddCmd() *cobra.Command {
-	var appsFlag string
+	var appsFlag, branchFlag string
 
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -71,18 +76,23 @@ Apps downloaded this way can later be installed via "kb manage".
 Examples:
   kb add                           # Interactive — pick apps from a menu
   kb add --apps kb_app,other_app   # Non-interactive
+  kb add --branch develop --apps kb_pro
 `,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireInitializedForCLI(); err != nil {
+				return err
+			}
 			if !bench.InBenchContainer() {
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}
 			preselected := parseAppsFlag(appsFlag)
-			return runAddToBench(cmd.Context(), preselected)
+			return runAddToBench(cmd.Context(), preselected, branchFlag)
 		},
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
+	cmd.Flags().StringVar(&branchFlag, "branch", "", "Git branch passed to bench get-app for each selected app (optional)")
 	return cmd
 }
 
@@ -128,7 +138,7 @@ func resolveToken() string {
 				EchoMode(huh.EchoModePassword).
 				Value(&token),
 			huh.NewConfirm().
-				Title("Save token to ~/.config/kb/github_token?").
+				Title("Save token to ~/.config/kb/config.json?").
 				Value(&saveToken),
 		),
 	).WithKeyMap(formKeyMap()).Run()
@@ -153,9 +163,27 @@ func resolveToken() string {
 	return token
 }
 
+// promptOptionalGitBranch asks for a single git ref to pass to every bench get-app
+// in this run. Esc / Ctrl+C returns a non-nil error (caller should abort quietly).
+func promptOptionalGitBranch() (string, error) {
+	var branch string
+	if err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Git branch (optional)").
+				Description("Applied to all selected apps for bench get-app — leave empty for each repo’s default branch · Esc/Ctrl+C to cancel").
+				Value(&branch),
+		),
+	).WithKeyMap(formKeyMap()).Run(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(branch), nil
+}
+
 // runInstall downloads and installs selected apps on the given site.
 // preselected, when non-nil, bypasses the interactive selector (used by cobra command / --no-input).
-func runInstall(ctx context.Context, site string, preselected []string) error {
+// branchFlag is used as-is when non-empty; otherwise an interactive user is prompted once.
+func runInstall(ctx context.Context, site string, preselected []string, branchFlag string) error {
 	allowedSet := license.AllowedSet()
 	if allowedSet == nil {
 		return fmt.Errorf("license required to install apps — run: kb activate")
@@ -219,6 +247,15 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 		}
 	}
 
+	branch := strings.TrimSpace(branchFlag)
+	if branch == "" && !globalFlags.NoInput {
+		var err error
+		branch, err = promptOptionalGitBranch()
+		if err != nil {
+			return nil
+		}
+	}
+
 	token := resolveToken()
 	appByName := indexByName(selectable)
 	fmt.Fprintln(os.Stdout)
@@ -232,7 +269,11 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 	dlResults := make([]dlResult, len(selected))
 	var mu sync.Mutex
 
-	fmt.Fprintf(os.Stdout, "Downloading %d app(s)…\n", len(selected))
+	if branch != "" {
+		fmt.Fprintf(os.Stdout, "Downloading %d app(s) on branch %s…\n", len(selected), branch)
+	} else {
+		fmt.Fprintf(os.Stdout, "Downloading %d app(s)…\n", len(selected))
+	}
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(3)
@@ -241,7 +282,7 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 		app := appByName[name]
 		g.Go(func() error {
 			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
-			out, err := bench.GetApp(dlCtx, app.URL, token)
+			out, err := bench.GetApp(dlCtx, app.URL, token, branch)
 			dlCancel()
 
 			mu.Lock()
@@ -297,7 +338,8 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 
 // runAddToBench downloads selected apps into the bench without installing them on any site.
 // preselected, when non-nil, bypasses the interactive selector.
-func runAddToBench(ctx context.Context, preselected []string) error {
+// branchFlag is used when non-empty; otherwise an interactive user is prompted once.
+func runAddToBench(ctx context.Context, preselected []string, branchFlag string) error {
 	allowedSet := license.AllowedSet()
 	if allowedSet == nil {
 		return fmt.Errorf("license required to download apps — run: kb activate")
@@ -351,6 +393,15 @@ func runAddToBench(ctx context.Context, preselected []string) error {
 		}
 	}
 
+	branch := strings.TrimSpace(branchFlag)
+	if branch == "" && !globalFlags.NoInput {
+		var err error
+		branch, err = promptOptionalGitBranch()
+		if err != nil {
+			return nil
+		}
+	}
+
 	token := resolveToken()
 	appByName := indexByName(selectable)
 	fmt.Fprintln(os.Stdout)
@@ -364,7 +415,11 @@ func runAddToBench(ctx context.Context, preselected []string) error {
 	dlResults := make([]dlResult, len(selected))
 	var mu sync.Mutex
 
-	fmt.Fprintf(os.Stdout, "Downloading %d app(s)…\n", len(selected))
+	if branch != "" {
+		fmt.Fprintf(os.Stdout, "Downloading %d app(s) on branch %s…\n", len(selected), branch)
+	} else {
+		fmt.Fprintf(os.Stdout, "Downloading %d app(s)…\n", len(selected))
+	}
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(3)
@@ -373,7 +428,7 @@ func runAddToBench(ctx context.Context, preselected []string) error {
 		app := appByName[name]
 		g.Go(func() error {
 			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
-			out, err := bench.GetApp(dlCtx, app.URL, token)
+			out, err := bench.GetApp(dlCtx, app.URL, token, branch)
 			dlCancel()
 
 			mu.Lock()
