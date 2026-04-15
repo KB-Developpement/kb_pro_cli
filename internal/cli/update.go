@@ -35,8 +35,9 @@ func newUpdateCmd() *cobra.Command {
 	var checkOnly, yes bool
 
 	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update kb to the latest version",
+		Use:     "update",
+		Aliases: []string{"u"},
+		Short:   "Update kb to the latest version",
 		Long: `Check GitHub for the latest kb release and replace the binary in place.
 
 Examples:
@@ -47,6 +48,10 @@ Examples:
 		// Still receives update check, but skips license check.
 		Annotations: map[string]string{"skipLicenseCheck": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// --no-input implies --yes (non-interactive confirmation).
+			if globalFlags.NoInput {
+				yes = true
+			}
 			return runUpdate(checkOnly, yes)
 		},
 	}
@@ -55,9 +60,8 @@ Examples:
 	return cmd
 }
 
-func githubClient() *resty.Client {
-	return resty.New().SetHeader("Accept", "application/vnd.github+json")
-}
+// githubHTTPClient is a shared resty client for GitHub API and release downloads.
+var githubHTTPClient = resty.New().SetHeader("Accept", "application/vnd.github+json")
 
 func runUpdate(checkOnly, yes bool) error {
 	current := version.Version
@@ -73,7 +77,7 @@ func runUpdate(checkOnly, yes bool) error {
 	_ = spinner.New().
 		Title("Checking for updates…").
 		Action(func() {
-			resp, err := githubClient().R().
+			resp, err := githubHTTPClient.R().
 				SetResult(&release).
 				Get(githubReleasesAPI)
 			if err != nil {
@@ -98,14 +102,18 @@ func runUpdate(checkOnly, yes bool) error {
 	upToDate := !isDev && !newerThan(current, latest)
 
 	if upToDate {
-		fmt.Fprintf(os.Stderr, "Already up to date (%s)\n", current)
+		if !globalFlags.Quiet {
+			fmt.Fprintf(os.Stderr, "Already up to date (%s)\n", current)
+		}
 		return nil
 	}
 
-	if isDev {
-		fmt.Fprintf(os.Stderr, "Running a dev build. Latest release: %s\n", latest)
-	} else {
-		fmt.Fprintf(os.Stderr, "Update available: %s → %s\n", current, latest)
+	if !globalFlags.Quiet {
+		if isDev {
+			fmt.Fprintf(os.Stderr, "Running a dev build. Latest release: %s\n", latest)
+		} else {
+			fmt.Fprintf(os.Stderr, "Update available: %s → %s\n", current, latest)
+		}
 	}
 
 	if checkOnly {
@@ -151,12 +159,14 @@ func runUpdate(checkOnly, yes bool) error {
 		return installErr
 	}
 
-	fmt.Fprintf(os.Stderr, "Updated to kb %s\n", latest)
+	if !globalFlags.Quiet {
+		fmt.Fprintf(os.Stderr, "Updated to kb %s\n", latest)
+	}
 	return nil
 }
 
 func downloadAndInstall(downloadURL string) error {
-	resp, err := resty.New().R().Get(downloadURL)
+	resp, err := githubHTTPClient.R().Get(downloadURL)
 	if err != nil {
 		return fmt.Errorf("downloading: %w", err)
 	}

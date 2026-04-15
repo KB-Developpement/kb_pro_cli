@@ -24,9 +24,9 @@ build:
 install:
 	go install -ldflags "$(LDFLAGS)" $(CMD_PATH)
 
-## test: run all tests
+## test: run all tests with race detector
 test:
-	go test ./...
+	go test -race ./...
 
 ## tidy: tidy and verify module dependencies
 tidy:

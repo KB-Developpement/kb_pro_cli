@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-resty/resty/v2"
-
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
 	"github.com/KB-Developpement/kb_pro_cli/internal/version"
 )
@@ -48,7 +46,7 @@ func runUpdateCheck() {
 	}
 
 	cur := version.Version
-	if cur != "dev" && cur != "" && newerThan(cur, state.Latest) {
+	if cur != "dev" && cur != "" && newerThan(cur, state.Latest) && !globalFlags.Quiet {
 		fmt.Fprintf(os.Stderr, "Update available: %s → %s  (run: kb update)\n", cur, state.Latest)
 	}
 
@@ -67,8 +65,7 @@ func startBackgroundFetch(path string) {
 
 func fetchAndStoreLatestRelease(path string) {
 	var release githubRelease
-	resp, err := resty.New().R().
-		SetHeader("Accept", "application/vnd.github+json").
+	resp, err := githubHTTPClient.R().
 		SetResult(&release).
 		Get(githubReleasesAPI)
 	if err != nil || resp.StatusCode() != 200 || release.TagName == "" {

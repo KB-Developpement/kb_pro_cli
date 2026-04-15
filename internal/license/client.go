@@ -41,6 +41,10 @@ type apiError struct {
 	Error string `json:"error"`
 }
 
+// httpClient is a shared resty client for all license-server calls.
+// Resty clients are safe for concurrent use and pool TCP connections.
+var httpClient = newClient()
+
 func newClient() *resty.Client {
 	return resty.New().
 		SetTimeout(15 * time.Second).
@@ -58,7 +62,7 @@ func Activate(serverBaseURL, licenseKey, fingerprint string) (string, error) {
 	var resp activateResponse
 	var apiErr apiError
 
-	r, err := newClient().R().
+	r, err := httpClient.R().
 		SetBody(map[string]string{
 			"license_key": licenseKey,
 			"fingerprint": fingerprint,
@@ -110,7 +114,7 @@ func Heartbeat(serverBaseURL, token, fingerprint string) HeartbeatResult {
 	var resp activateResponse
 	var apiErr apiError
 
-	r, err := newClient().R().
+	r, err := httpClient.R().
 		SetBody(map[string]string{
 			"token":       token,
 			"fingerprint": fingerprint,

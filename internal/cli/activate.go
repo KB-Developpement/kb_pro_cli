@@ -15,8 +15,9 @@ import (
 
 func newActivateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "activate [license-key]",
-		Short: "Activate this machine with a KB Pro license key",
+		Use:     "activate [license-key]",
+		Aliases: []string{"a"},
+		Short:   "Activate this machine with a KB Pro license key",
 		Long: `Activate this machine using your KB Pro license key.
 
 The license key is provided by KB-Developpement when you purchase a support contract.
@@ -45,6 +46,9 @@ func runActivate(args []string) error {
 		licenseKey = license.LoadLicenseKey()
 	}
 	if licenseKey == "" {
+		if globalFlags.NoInput {
+			return fmt.Errorf("no license key provided — pass it as an argument: kb activate <key>")
+		}
 		if err := huh.NewForm(
 			huh.NewGroup(
 				huh.NewInput().
@@ -90,7 +94,9 @@ func runActivate(args []string) error {
 		return fmt.Errorf("save license token: %w", err)
 	}
 
-	fmt.Fprintln(os.Stdout, ui.Success.Render("License activated successfully."))
-	fmt.Fprintln(os.Stdout, ui.Dim.Render("Run: kb license — to view license details."))
+	if !globalFlags.Quiet {
+		fmt.Fprintln(os.Stdout, ui.Success.Render("License activated successfully."))
+		fmt.Fprintln(os.Stdout, ui.Dim.Render("Run: kb license — to view license details."))
+	}
 	return nil
 }

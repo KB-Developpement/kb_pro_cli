@@ -1,12 +1,17 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
@@ -15,11 +20,103 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
+// newInstallCmd returns the "install" subcommand which downloads and installs
+// selected KB apps on the active Frappe site.
+func newInstallCmd() *cobra.Command {
+	var appsFlag string
+
+	cmd := &cobra.Command{
+		Use:     "install",
+		Aliases: []string{"i"},
+		Short:   "Download and install KB apps on this site",
+		Long: `Download and install selected KB-Developpement apps on the active Frappe site.
+
+Examples:
+  kb install                           # Interactive — pick apps from a menu
+  kb install --apps kb_app,other_app   # Non-interactive install
+  kb install --no-input --apps kb_app  # Scripted / CI usage
+`,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !bench.InBenchContainer() {
+				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
+			}
+			site, err := bench.DetectSiteName()
+			if err != nil {
+				return fmt.Errorf("could not detect site name: %w\nSet the active site with: bench use <site>", err)
+			}
+			if !globalFlags.Quiet {
+				fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
+			}
+			preselected := parseAppsFlag(appsFlag)
+			return runInstall(cmd.Context(), site, preselected)
+		},
+	}
+
+	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
+	return cmd
+}
+
+// newAddCmd returns the "add" subcommand which downloads KB apps into the bench
+// without installing them on any site.
+func newAddCmd() *cobra.Command {
+	var appsFlag string
+
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Download KB apps into the bench without site installation",
+		Long: `Download selected KB-Developpement apps into the bench apps folder.
+Apps downloaded this way can later be installed via "kb manage".
+
+Examples:
+  kb add                           # Interactive — pick apps from a menu
+  kb add --apps kb_app,other_app   # Non-interactive
+`,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !bench.InBenchContainer() {
+				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
+			}
+			preselected := parseAppsFlag(appsFlag)
+			return runAddToBench(cmd.Context(), preselected)
+		},
+	}
+
+	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
+	return cmd
+}
+
+// parseAppsFlag splits a comma-separated app list into trimmed, non-empty names.
+// Returns nil when flag is empty.
+func parseAppsFlag(flag string) []string {
+	if flag == "" {
+		return nil
+	}
+	parts := strings.Split(flag, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if name := strings.TrimSpace(p); name != "" {
+			out = append(out, name)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // resolveToken returns a GitHub token from env/config, prompting the user if none is found.
 func resolveToken() string {
 	token := config.LoadToken()
 	if token != "" {
 		return token
+	}
+
+	if globalFlags.NoInput {
+		if !globalFlags.Quiet {
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("No GitHub token found. Set KB_GITHUB_TOKEN or use --no-input with a configured token."))
+		}
+		return ""
 	}
 
 	var saveToken bool
@@ -37,9 +134,17 @@ func resolveToken() string {
 	).WithKeyMap(formKeyMap()).Run()
 
 	if token == "" {
-		fmt.Fprintln(os.Stderr, ui.Dim.Render("No token provided — private repos may fail."))
+		if !globalFlags.Quiet {
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("No token provided — private repos may fail."))
+		}
 		return ""
 	}
+
+	// Warn if the token doesn't look like a known GitHub PAT format.
+	if !strings.HasPrefix(token, "ghp_") && !strings.HasPrefix(token, "github_pat_") {
+		fmt.Fprintln(os.Stderr, ui.Dim.Render("Warning: token does not start with 'ghp_' or 'github_pat_' — verify it is a valid GitHub PAT."))
+	}
+
 	if saveToken {
 		if err := config.SaveToken(token); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not save token: %v\n", err)
@@ -49,17 +154,15 @@ func resolveToken() string {
 }
 
 // runInstall downloads and installs selected apps on the given site.
-// Only shows apps that are not yet in the bench and not installed on site.
-// Apps already downloaded (in bench) should be installed via "Manage".
-func runInstall(site string) error {
-	// License gate: must have an active license to install apps.
+// preselected, when non-nil, bypasses the interactive selector (used by cobra command / --no-input).
+func runInstall(ctx context.Context, site string, preselected []string) error {
 	allowedSet := license.AllowedSet()
 	if allowedSet == nil {
 		return fmt.Errorf("license required to install apps — run: kb activate")
 	}
 
 	installed, detectErr := bench.DetectInstalledApps(site)
-	if detectErr != nil {
+	if detectErr != nil && !globalFlags.Quiet {
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Warning: could not detect installed apps — all apps will be shown"))
 	}
 	inBench := bench.DetectAppsInBench()
@@ -79,73 +182,122 @@ func runInstall(site string) error {
 		}
 	}
 
-	if len(notLicensed) > 0 {
-		fmt.Fprintln(os.Stderr, ui.Dim.Render("Not in your license: "+strings.Join(notLicensed, ", ")))
-	}
-	if len(alreadyInstalled) > 0 {
-		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already installed: "+strings.Join(alreadyInstalled, ", ")))
-	}
-	if len(alreadyDownloaded) > 0 {
-		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already downloaded (use Manage to install): "+strings.Join(alreadyDownloaded, ", ")))
+	if !globalFlags.Quiet {
+		if len(notLicensed) > 0 {
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("Not in your license: "+strings.Join(notLicensed, ", ")))
+		}
+		if len(alreadyInstalled) > 0 {
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("Already installed: "+strings.Join(alreadyInstalled, ", ")))
+		}
+		if len(alreadyDownloaded) > 0 {
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("Already downloaded (use Manage to install): "+strings.Join(alreadyDownloaded, ", ")))
+		}
 	}
 	if len(selectable) == 0 {
 		fmt.Fprintln(os.Stdout, ui.Success.Render("All KB apps are already installed or downloaded."))
 		return nil
 	}
 
-	selected, err := selectApps(selectable, "Select KB apps to install")
-	if err != nil || len(selected) == 0 {
-		return nil
+	var selected []string
+	if preselected != nil {
+		// Validate preselected names are installable.
+		selectableByName := indexByName(selectable)
+		for _, name := range preselected {
+			if _, ok := selectableByName[name]; !ok {
+				return fmt.Errorf("app %q is not available for installation (not licensed, already installed, or unknown)", name)
+			}
+		}
+		selected = preselected
+	} else {
+		if globalFlags.NoInput {
+			return fmt.Errorf("specify apps with --apps when using --no-input")
+		}
+		var err error
+		selected, err = selectApps(selectable, "Select KB apps to install")
+		if err != nil || len(selected) == 0 {
+			return nil
+		}
 	}
 
 	token := resolveToken()
-
 	appByName := indexByName(selectable)
 	fmt.Fprintln(os.Stdout)
 
-	results := make([]installResult, 0, len(selected))
+	// --- Phase 1: Download all apps in parallel (up to 3 concurrent) ---
+	type dlResult struct {
+		name string
+		out  string
+		err  error
+	}
+	dlResults := make([]dlResult, len(selected))
+	var mu sync.Mutex
 
-	for _, name := range selected {
+	fmt.Fprintf(os.Stdout, "Downloading %d app(s)…\n", len(selected))
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(3)
+
+	for i, name := range selected {
 		app := appByName[name]
+		g.Go(func() error {
+			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
+			out, err := bench.GetApp(dlCtx, app.URL, token)
+			dlCancel()
 
-		var getErr error
-		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Downloading %s…", ui.AppName.Render(name))).
-			Action(func() { getErr = bench.GetApp(app.URL, token) }).
-			Run(); spinErr != nil {
-			getErr = spinErr
-		}
-		if getErr != nil {
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), getErr)
-			results = append(results, installResult{name, getErr})
+			mu.Lock()
+			dlResults[i] = dlResult{name: name, out: out, err: err}
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), ui.AppName.Render(name))
+			} else {
+				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))
+				if globalFlags.Verbose && out != "" {
+					fmt.Fprintln(os.Stdout, ui.Dim.Render(out))
+				}
+			}
+			mu.Unlock()
+			return nil // Never abort sibling downloads on a single failure.
+		})
+	}
+	_ = g.Wait()
+	fmt.Fprintln(os.Stdout)
+
+	// --- Phase 2: Install downloaded apps sequentially ---
+	results := make([]installResult, 0, len(selected))
+	for _, dr := range dlResults {
+		if dr.err != nil {
+			fmt.Fprintf(os.Stdout, "%s %s: download failed: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(dr.name), dr.err)
+			results = append(results, installResult{dr.name, dr.err})
 			continue
 		}
-
+		var installOut string
 		var installErr error
+		opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
 		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(name), site)).
-			Action(func() { installErr = bench.InstallApp(site, name) }).
+			Title(fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(dr.name), site)).
+			Action(func() { installOut, installErr = bench.InstallApp(opCtx, site, dr.name) }).
 			Run(); spinErr != nil {
 			installErr = spinErr
 		}
+		opCancel()
 		if installErr != nil {
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), installErr)
-			results = append(results, installResult{name, installErr})
-			continue
+			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(dr.name), installErr)
+		} else {
+			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(dr.name))
+			if globalFlags.Verbose && installOut != "" {
+				fmt.Fprintln(os.Stdout, ui.Dim.Render(installOut))
+			}
 		}
-
-		fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
-		results = append(results, installResult{name, nil})
+		results = append(results, installResult{dr.name, installErr})
 	}
 
 	printSummary(results)
+	pause()
 	return nil
 }
 
-// runAddToBench downloads selected apps into the bench apps folder without installing them on any site.
-// Skips apps whose source folder already exists in the bench.
-func runAddToBench() error {
-	// License gate.
+// runAddToBench downloads selected apps into the bench without installing them on any site.
+// preselected, when non-nil, bypasses the interactive selector.
+func runAddToBench(ctx context.Context, preselected []string) error {
 	allowedSet := license.AllowedSet()
 	if allowedSet == nil {
 		return fmt.Errorf("license required to download apps — run: kb activate")
@@ -166,48 +318,87 @@ func runAddToBench() error {
 		}
 	}
 
-	if len(notLicensed) > 0 {
-		fmt.Fprintln(os.Stderr, ui.Dim.Render("Not in your license: "+strings.Join(notLicensed, ", ")))
-	}
-	if len(alreadyPresent) > 0 {
-		fmt.Fprintln(os.Stderr, ui.Dim.Render("Already in bench: "+strings.Join(alreadyPresent, ", ")))
+	if !globalFlags.Quiet {
+		if len(notLicensed) > 0 {
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("Not in your license: "+strings.Join(notLicensed, ", ")))
+		}
+		if len(alreadyPresent) > 0 {
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("Already in bench: "+strings.Join(alreadyPresent, ", ")))
+		}
 	}
 	if len(selectable) == 0 {
 		fmt.Fprintln(os.Stdout, ui.Success.Render("All KB apps are already present in the bench."))
 		return nil
 	}
 
-	selected, err := selectApps(selectable, "Select KB apps to add to bench")
-	if err != nil || len(selected) == 0 {
-		return nil
+	var selected []string
+	if preselected != nil {
+		selectableByName := indexByName(selectable)
+		for _, name := range preselected {
+			if _, ok := selectableByName[name]; !ok {
+				return fmt.Errorf("app %q is not available for download (not licensed, already in bench, or unknown)", name)
+			}
+		}
+		selected = preselected
+	} else {
+		if globalFlags.NoInput {
+			return fmt.Errorf("specify apps with --apps when using --no-input")
+		}
+		var err error
+		selected, err = selectApps(selectable, "Select KB apps to add to bench")
+		if err != nil || len(selected) == 0 {
+			return nil
+		}
 	}
 
 	token := resolveToken()
-
 	appByName := indexByName(selectable)
 	fmt.Fprintln(os.Stdout)
 
-	results := make([]installResult, 0, len(selected))
+	// Download all apps in parallel (up to 3 concurrent).
+	type dlResult struct {
+		name string
+		out  string
+		err  error
+	}
+	dlResults := make([]dlResult, len(selected))
+	var mu sync.Mutex
 
-	for _, name := range selected {
+	fmt.Fprintf(os.Stdout, "Downloading %d app(s)…\n", len(selected))
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(3)
+
+	for i, name := range selected {
 		app := appByName[name]
+		g.Go(func() error {
+			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
+			out, err := bench.GetApp(dlCtx, app.URL, token)
+			dlCancel()
 
-		var getErr error
-		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Downloading %s…", ui.AppName.Render(name))).
-			Action(func() { getErr = bench.GetApp(app.URL, token) }).
-			Run(); spinErr != nil {
-			getErr = spinErr
-		}
-		if getErr != nil {
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), getErr)
-		} else {
-			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
-		}
-		results = append(results, installResult{name, getErr})
+			mu.Lock()
+			dlResults[i] = dlResult{name: name, out: out, err: err}
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), ui.AppName.Render(name))
+			} else {
+				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))
+				if globalFlags.Verbose && out != "" {
+					fmt.Fprintln(os.Stdout, ui.Dim.Render(out))
+				}
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+	_ = g.Wait()
+
+	results := make([]installResult, len(dlResults))
+	for i, dr := range dlResults {
+		results[i] = installResult{dr.name, dr.err}
 	}
 
 	printSummary(results)
+	pause()
 	return nil
 }
 
@@ -231,7 +422,7 @@ func selectApps(selectable []apps.App, title string) ([]string, error) {
 		return nil, err
 	}
 
-	if len(selected) == 0 {
+	if len(selected) == 0 && !globalFlags.Quiet {
 		fmt.Fprintln(os.Stdout, ui.Dim.Render("No apps selected."))
 	}
 	return selected, nil
