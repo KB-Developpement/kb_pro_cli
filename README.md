@@ -6,7 +6,7 @@ An interactive CLI for installing, managing, upgrading, and licensing KB-Develop
 
 - A running Frappe bench managed by [ffm](https://github.com/nasroykh/foxmayn_frappe_manager)
 - Access to the bench container via `ffm shell`
-- A reachable **KB Pro license server** that implements `POST /activate`, `POST /heartbeat`, and **`GET /download/{app}`** (the server uses its own **`KB_GITHUB_PAT`** to pull archives from GitHub — clients do not clone private repos for app installs)
+- A reachable **KB Pro license server** that implements `POST /activate`, `POST /heartbeat`, and **`GET /download/{app}`** (the server uses a stored **GitHub PAT** to pull archives from GitHub — clients do not clone private repos for app installs)
 - Go **1.26+** only if you build `kb` from source
 
 ## Installation
@@ -42,6 +42,8 @@ If you cancel the wizard before saving, the bare **`kb`** menu does not open unt
 
 **`kb activate`**, **`kb license`**, and **`kb update --check`** do **not** require `config.json`. Activation uses the stored license server URL (or the built-in default) unless you set **`KB_LICENSE_SERVER`**.
 
+**`KB_BENCH_ROOT`** — optional. `kb install` / `kb add` / `kb upgrade` run `bench` with working directory **`/workspace/frappe-bench`** by default (the path inside the standard dev container). If your bench root differs, set **`KB_BENCH_ROOT`** to that absolute path.
+
 ### Main menu (inside the bench)
 
 Open a shell in your bench container and run **`kb`**:
@@ -65,9 +67,9 @@ KB — What would you like to do?
 
 ### Install apps
 
-For each selected app, **`kb`** calls **`GET {license_server}/download/{app}`** with `Authorization: Bearer <JWT>`. If the query string **`v`** is omitted, the license server resolves **GitHub `releases/latest`** for that repository. Downloads run **in parallel** (up to 3 at a time); each tarball is extracted and registered with **`bench get-app <extracted-dir>`**, then **`bench install-app`** runs **sequentially** on the active site. Apps already installed on the site or already present in the bench are excluded from the picker.
+For each selected app, **`kb`** calls **`GET {license_server}/download/{app}`** with `Authorization: Bearer <JWT>`. If the query string **`v`** is omitted, the license server resolves **GitHub `releases/latest`** for that repository. Downloads run **in parallel** (up to 3 at a time); each tarball is extracted under **`apps/<app>/`**, the app is added to **`sites/apps.txt`**, and **`bench setup requirements <app>`** installs Python deps (GitHub archives have no **`.git`**, so **`bench get-app <dir>`** is not used). Then **`bench install-app`** runs **sequentially** on the active site. Apps already installed on the site or already present in the bench are excluded from the picker.
 
-You need **`kb activate`** first so a JWT is available. If downloads fail with HTTP 402/403 or upstream errors, ensure the license server has **`KB_GITHUB_PAT`** configured and that the app is in your JWT **`allowed_apps`** list.
+You need **`kb activate`** first so a JWT is available. If downloads fail with HTTP 402/403 or upstream errors, ensure the license server has a **GitHub PAT** configured (`github_pat` / `kbls config`) and that the app is in your JWT **`allowed_apps`** list.
 
 ### Add apps to bench
 
@@ -128,7 +130,7 @@ Separately, on commands that run the normal startup license hook, if **`last_che
 | Field | Meaning |
 |-------|---------|
 | `license_server_url` | Base URL for activation, heartbeat, and **`GET /download/{app}`** (no trailing path). |
-| `github_token` | Optional; kept in config for compatibility. App tarballs are **not** fetched with this token — the **license server** uses **`KB_GITHUB_PAT`**. |
+| `github_token` | Optional; kept in config for compatibility. App tarballs are **not** fetched with this token — the **license server** uses its own **GitHub PAT** (`kbls config`). |
 
 **License server URL — precedence (highest wins):**
 

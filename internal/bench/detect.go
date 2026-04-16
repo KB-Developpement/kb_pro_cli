@@ -8,11 +8,21 @@ import (
 	"strings"
 )
 
-const benchRoot = "/workspace/frappe-bench"
+// defaultBenchDir is the bench path inside the standard KB dev container image.
+const defaultBenchDir = "/workspace/frappe-bench"
+
+// benchDir returns the Frappe bench directory used for `bench` CLI calls and app paths.
+// Set KB_BENCH_ROOT when your bench lives elsewhere (e.g. ~/frappe-bench on a host machine).
+func benchDir() string {
+	if v := strings.TrimSpace(os.Getenv("KB_BENCH_ROOT")); v != "" {
+		return v
+	}
+	return defaultBenchDir
+}
 
 // InBenchContainer returns true if the current environment looks like a Frappe bench container.
 func InBenchContainer() bool {
-	info, err := os.Stat(benchRoot + "/apps")
+	info, err := os.Stat(benchDir() + "/apps")
 	return err == nil && info.IsDir()
 }
 
@@ -20,7 +30,7 @@ func InBenchContainer() bool {
 // It first reads sites/currentsite.txt, then falls back to listing site directories.
 func DetectSiteName() (string, error) {
 	// Primary: currentsite.txt
-	data, err := os.ReadFile(benchRoot + "/sites/currentsite.txt")
+	data, err := os.ReadFile(benchDir() + "/sites/currentsite.txt")
 	if err == nil {
 		site := strings.TrimSpace(string(data))
 		if site != "" {
@@ -29,7 +39,7 @@ func DetectSiteName() (string, error) {
 	}
 
 	// Fallback: list directories under sites/, exclude "assets"
-	entries, err := os.ReadDir(benchRoot + "/sites")
+	entries, err := os.ReadDir(benchDir() + "/sites")
 	if err != nil {
 		return "", fmt.Errorf("cannot read sites directory: %w", err)
 	}
@@ -43,7 +53,7 @@ func DetectSiteName() (string, error) {
 
 	switch len(sites) {
 	case 0:
-		return "", fmt.Errorf("no sites found in %s/sites", benchRoot)
+		return "", fmt.Errorf("no sites found in %s/sites", benchDir())
 	case 1:
 		return sites[0], nil
 	default:
@@ -55,7 +65,7 @@ func DetectSiteName() (string, error) {
 // DetectAppsInBench returns a set of app names whose source folder exists under bench/apps/.
 // This reflects what has been downloaded via bench get-app, regardless of site installation.
 func DetectAppsInBench() map[string]bool {
-	entries, err := os.ReadDir(benchRoot + "/apps")
+	entries, err := os.ReadDir(benchDir() + "/apps")
 	if err != nil {
 		return map[string]bool{}
 	}
@@ -74,7 +84,7 @@ func DetectInstalledApps(site string) (map[string]bool, error) {
 	// --format json outputs {"site_name": ["app1", "app2", ...]} with clean app names only.
 	// The default text format includes version and branch per line which breaks name matching.
 	cmd := exec.Command("bench", "--site", site, "list-apps", "--format", "json")
-	cmd.Dir = benchRoot
+	cmd.Dir = benchDir()
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bench list-apps: %w", err)

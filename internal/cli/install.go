@@ -222,7 +222,7 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 			mu.Lock()
 			dlResults[i] = dlResult{name: name, out: out, err: dlErr}
 			if dlErr != nil {
-				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), ui.AppName.Render(name))
+				fmt.Fprintf(os.Stdout, "  %s %s — %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), dlErr)
 			} else {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))
 				if globalFlags.Verbose && out != "" {
@@ -240,7 +240,7 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 	results := make([]installResult, 0, len(selected))
 	for _, dr := range dlResults {
 		if dr.err != nil {
-			fmt.Fprintf(os.Stdout, "%s %s: download failed: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(dr.name), dr.err)
+			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(dr.name), dr.err)
 			results = append(results, installResult{dr.name, dr.err})
 			continue
 		}
@@ -366,7 +366,7 @@ func runAddToBench(ctx context.Context, preselected []string) error {
 			mu.Lock()
 			dlResults[i] = dlResult{name: name, out: out, err: dlErr}
 			if dlErr != nil {
-				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), ui.AppName.Render(name))
+				fmt.Fprintf(os.Stdout, "  %s %s — %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), dlErr)
 			} else {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))
 				if globalFlags.Verbose && out != "" {
@@ -446,7 +446,7 @@ func printSummary(results []installResult) {
 		fmt.Fprintln(os.Stdout, ui.Bold.Render(fmt.Sprintf("%d succeeded, %d failed:", successes, failures)))
 		for _, r := range results {
 			if r.err != nil {
-				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), r.name)
+				fmt.Fprintf(os.Stdout, "  %s %s — %v\n", ui.Failure.Render("✗"), r.name, r.err)
 			}
 		}
 	}

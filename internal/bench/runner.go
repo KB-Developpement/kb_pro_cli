@@ -80,33 +80,74 @@ func UpdateApp(ctx context.Context, appName string) (string, error) {
 
 // GetAppFromArchive installs a new KB app from a .tar.gz source archive.
 //
-// The archive (typically fetched from GitHub via the license server) has a
-// single top-level directory whose name includes the commit hash.  We extract
-// with --strip-components=1 into a temp directory named after the app, then
-// call "bench get-app <dir>" so bench registers the app correctly.
+// GitHub release tarballs are plain source trees (no `.git`). `bench get-app`
+// is built around Git URLs or git repos on disk, so we extract under
+// `apps/<app>/`, append the app to `sites/apps.txt`, then run
+// `bench setup requirements <app>` — the same registration path bench uses
+// after a clone (see frappe/bench BenchSetup.requirements).
 //
 // The caller is responsible for removing archivePath after this returns.
 func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
-	// Create a temp parent so the extracted directory can be named exactly
-	// after the app — bench uses the directory basename as the app name.
-	tmpParent, err := os.MkdirTemp("", "kb-install-*")
-	if err != nil {
-		return "", fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpParent)
-
-	extractDir := filepath.Join(tmpParent, appName)
-	if err := os.MkdirAll(extractDir, 0755); err != nil {
-		return "", fmt.Errorf("create extract dir: %w", err)
+	root := benchDir()
+	if _, err := os.Stat(root); err != nil {
+		return "", fmt.Errorf("bench directory %q is not accessible (set KB_BENCH_ROOT): %w", root, err)
 	}
 
-	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", extractDir, "--strip-components=1")
-	tarCmd.Dir = benchRoot
+	appDir := filepath.Join(root, "apps", appName)
+	if fi, err := os.Stat(appDir); err == nil && fi.IsDir() {
+		return "", fmt.Errorf("app %q already exists at %s — remove it or use upgrade", appName, appDir)
+	}
+
+	stagingDir := appDir + ".kb-new"
+	_ = os.RemoveAll(stagingDir)
+	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+		return "", fmt.Errorf("create staging dir: %w", err)
+	}
+
+	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", stagingDir, "--strip-components=1")
+	tarCmd.Dir = filepath.Dir(stagingDir)
 	if out, err := tarCmd.CombinedOutput(); err != nil {
+		_ = os.RemoveAll(stagingDir)
 		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
 	}
 
-	return runBench(ctx, "get-app", extractDir)
+	if err := os.Rename(stagingDir, appDir); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return "", fmt.Errorf("move app into apps/: %w", err)
+	}
+
+	if err := appendAppToAppsTxt(root, appName); err != nil {
+		_ = os.RemoveAll(appDir)
+		return "", err
+	}
+
+	return runBench(ctx, "setup", "requirements", appName)
+}
+
+// appendAppToAppsTxt adds appName as a line to sites/apps.txt if not already listed.
+func appendAppToAppsTxt(benchRoot, appName string) error {
+	path := filepath.Join(benchRoot, "sites", "apps.txt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w (expected a Frappe bench with sites/apps.txt)", path, err)
+	}
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == appName {
+			return nil
+		}
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(content, "\n"))
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+	b.WriteString(appName)
+	b.WriteByte('\n')
+	if err := os.WriteFile(path, []byte(b.String()), 0644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
@@ -118,7 +159,7 @@ func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string
 //
 // The caller is responsible for removing archivePath after this returns.
 func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
-	appDir := filepath.Join(benchRoot, "apps", appName)
+	appDir := filepath.Join(benchDir(), "apps", appName)
 	stagingDir := appDir + ".new"
 
 	// Clean up any leftover staging dir from a previous failed upgrade.
@@ -128,13 +169,13 @@ func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string
 	}
 
 	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", stagingDir, "--strip-components=1")
-	tarCmd.Dir = benchRoot
+	tarCmd.Dir = filepath.Dir(stagingDir)
 	if out, err := tarCmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(stagingDir)
 		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
 	}
 
-	// Atomically replace the app directory. Both paths are within benchRoot
+	// Atomically replace the app directory. Both paths are within the bench dir
 	// (same filesystem), so os.Rename is an atomic rename(2) syscall.
 	if err := os.RemoveAll(appDir); err != nil {
 		_ = os.RemoveAll(stagingDir)
@@ -155,8 +196,13 @@ func runBench(ctx context.Context, args ...string) (string, error) {
 // runBenchWithEnv executes a bench command with optional extra environment variables
 // appended to the current process environment.
 func runBenchWithEnv(ctx context.Context, extraEnv []string, args ...string) (string, error) {
+	root := benchDir()
+	if _, err := os.Stat(root); err != nil {
+		return "", fmt.Errorf("bench directory %q is not accessible (set KB_BENCH_ROOT to your Frappe bench root): %w", root, err)
+	}
+
 	cmd := exec.CommandContext(ctx, "bench", args...)
-	cmd.Dir = benchRoot
+	cmd.Dir = root
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
