@@ -81,10 +81,10 @@ func UpdateApp(ctx context.Context, appName string) (string, error) {
 // GetAppFromArchive installs a new KB app from a .tar.gz source archive.
 //
 // GitHub release tarballs are plain source trees (no `.git`). `bench get-app`
-// is built around Git URLs or git repos on disk, so we extract under
-// `apps/<app>/`, append the app to `sites/apps.txt`, then run
-// `bench setup requirements <app>` — the same registration path bench uses
-// after a clone (see frappe/bench BenchSetup.requirements).
+// and plain `bench setup requirements <app>` construct bench.app.App, which
+// calls git.Repo on the app path and crashes without `.git`. We use
+// `bench setup requirements --python <app>` instead, which runs BenchSetup.python
+// (pip/uv install -e apps/<app>) without that git metadata path.
 //
 // The caller is responsible for removing archivePath after this returns.
 func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
@@ -121,7 +121,11 @@ func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string
 		return "", err
 	}
 
-	return runBench(ctx, "setup", "requirements", appName)
+	out, err := runBench(ctx, "setup", "requirements", "--python", appName)
+	if err != nil && out != "" {
+		return out, fmt.Errorf("%s: %w", out, err)
+	}
+	return out, err
 }
 
 // appendAppToAppsTxt adds appName as a line to sites/apps.txt if not already listed.
