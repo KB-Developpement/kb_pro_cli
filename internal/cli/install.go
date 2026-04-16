@@ -23,7 +23,7 @@ import (
 // newInstallCmd returns the "install" subcommand which downloads and installs
 // selected KB apps on the active Frappe site.
 func newInstallCmd() *cobra.Command {
-	var appsFlag string
+	var appsFlag, versionFlag string
 
 	cmd := &cobra.Command{
 		Use:     "install",
@@ -37,6 +37,7 @@ token is required on the client.
 Examples:
   kb install                           # Interactive — pick apps from a menu
   kb install --apps kb_app,other_app   # Non-interactive install
+  kb install --apps kb_pro --version v1.2.0   # Pin a tag/branch/commit (one app only)
   kb install --no-input --apps kb_app  # Scripted / CI usage
 `,
 		SilenceUsage: true,
@@ -55,18 +56,19 @@ Examples:
 				fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
 			}
 			preselected := parseAppsFlag(appsFlag)
-			return runInstall(cmd.Context(), site, preselected)
+			return runInstall(cmd.Context(), site, preselected, versionFlag)
 		},
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
+	cmd.Flags().StringVar(&versionFlag, "version", "", "Git tag, branch, or commit for the download when exactly one app is selected (default: latest release)")
 	return cmd
 }
 
 // newAddCmd returns the "add" subcommand which downloads KB apps into the bench
 // without installing them on any site.
 func newAddCmd() *cobra.Command {
-	var appsFlag string
+	var appsFlag, versionFlag string
 
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -80,6 +82,7 @@ token is required on the client.
 Examples:
   kb add                           # Interactive — pick apps from a menu
   kb add --apps kb_app,other_app   # Non-interactive
+  kb add --apps kb_pro --version v1.2.0   # Pin a tag/branch/commit (one app only)
 `,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -90,11 +93,12 @@ Examples:
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}
 			preselected := parseAppsFlag(appsFlag)
-			return runAddToBench(cmd.Context(), preselected)
+			return runAddToBench(cmd.Context(), preselected, versionFlag)
 		},
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
+	cmd.Flags().StringVar(&versionFlag, "version", "", "Git tag, branch, or commit for the download when exactly one app is selected (default: latest release)")
 	return cmd
 }
 
@@ -119,7 +123,9 @@ func parseAppsFlag(flag string) []string {
 
 // runInstall downloads and installs selected apps on the given site.
 // preselected, when non-nil, bypasses the interactive selector.
-func runInstall(ctx context.Context, site string, preselected []string) error {
+// Download ref: empty means latest on the license server. For exactly one app, the ref comes from
+// --version (non-interactive / --apps) or from the optional version form (interactive); for multiple apps, ref is always empty.
+func runInstall(ctx context.Context, site string, preselected []string, versionFromFlag string) error {
 	if err := license.RunSyncCheck(ctx); err != nil {
 		return err
 	}
@@ -191,6 +197,11 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 		}
 	}
 
+	downloadRef, err := resolveDownloadRef(selected, versionFromFlag, preselected == nil)
+	if err != nil {
+		return nil
+	}
+
 	fmt.Fprintln(os.Stdout)
 
 	// --- Phase 1: Download all apps in parallel (up to 3 concurrent) ---
@@ -212,7 +223,7 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
 			defer dlCancel()
 
-			tmpPath, dlErr := license.DownloadApp(dlCtx, serverURL, token, name, "")
+			tmpPath, dlErr := license.DownloadApp(dlCtx, serverURL, token, name, downloadRef)
 			var out string
 			if dlErr == nil {
 				out, dlErr = bench.GetAppFromArchive(dlCtx, tmpPath, name)
@@ -272,7 +283,8 @@ func runInstall(ctx context.Context, site string, preselected []string) error {
 
 // runAddToBench downloads selected apps into the bench without installing them on any site.
 // preselected, when non-nil, bypasses the interactive selector.
-func runAddToBench(ctx context.Context, preselected []string) error {
+// versionFromFlag and interactive version prompt behave like runInstall.
+func runAddToBench(ctx context.Context, preselected []string, versionFromFlag string) error {
 	if err := license.RunSyncCheck(ctx); err != nil {
 		return err
 	}
@@ -335,6 +347,11 @@ func runAddToBench(ctx context.Context, preselected []string) error {
 		}
 	}
 
+	downloadRef, err := resolveDownloadRef(selected, versionFromFlag, preselected == nil)
+	if err != nil {
+		return nil
+	}
+
 	fmt.Fprintln(os.Stdout)
 
 	// Download all apps in parallel (up to 3 concurrent).
@@ -356,7 +373,7 @@ func runAddToBench(ctx context.Context, preselected []string) error {
 			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
 			defer dlCancel()
 
-			tmpPath, dlErr := license.DownloadApp(dlCtx, serverURL, token, name, "")
+			tmpPath, dlErr := license.DownloadApp(dlCtx, serverURL, token, name, downloadRef)
 			var out string
 			if dlErr == nil {
 				out, dlErr = bench.GetAppFromArchive(dlCtx, tmpPath, name)
@@ -387,6 +404,40 @@ func runAddToBench(ctx context.Context, preselected []string) error {
 	printSummary(results)
 	pause()
 	return nil
+}
+
+// resolveDownloadRef returns the Git ref to pass as ?v= to the license server (empty = latest).
+// When more than one app is selected, ref is always empty and versionFromFlag is ignored (with a dim warning if set).
+// When exactly one app: if usedInteractiveMenu, the user is prompted (defaultRef pre-fills from --version if set); otherwise versionFromFlag is used.
+func resolveDownloadRef(selected []string, versionFromFlag string, usedInteractiveMenu bool) (string, error) {
+	if len(selected) != 1 {
+		if len(selected) > 1 && strings.TrimSpace(versionFromFlag) != "" && !globalFlags.Quiet {
+			fmt.Fprintln(os.Stderr, ui.Dim.Render("Ignoring --version: more than one app selected; using latest release for each."))
+		}
+		return "", nil
+	}
+	if usedInteractiveMenu {
+		return promptOptionalDownloadRef(selected[0], strings.TrimSpace(versionFromFlag))
+	}
+	return strings.TrimSpace(versionFromFlag), nil
+}
+
+// promptOptionalDownloadRef asks for an optional tag/branch/commit when a single app was chosen interactively.
+// defaultRef is shown in the field first (e.g. from kb install --version … without --apps).
+func promptOptionalDownloadRef(appName, defaultRef string) (string, error) {
+	ref := defaultRef
+	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Version or tag (optional)").
+				Description(fmt.Sprintf("Git ref for %s — leave blank for latest release (license server ?v=)", appName)).
+				Value(&ref),
+		),
+	).WithKeyMap(formKeyMap()).Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(ref), nil
 }
 
 // selectApps shows a multi-select form and returns the chosen app names.

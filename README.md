@@ -67,13 +67,13 @@ KB — What would you like to do?
 
 ### Install apps
 
-For each selected app, **`kb`** calls **`GET {license_server}/download/{app}`** with `Authorization: Bearer <JWT>`. If the query string **`v`** is omitted, the license server resolves **GitHub `releases/latest`** for that repository. Downloads run **in parallel** (up to 3 at a time); each tarball is extracted under **`apps/<app>/`**, the app is added to **`sites/apps.txt`**, and **`bench setup requirements --python <app>`** installs the app into the bench venv with **pip/uv** (plain **`bench setup requirements <app>`** would open **`git.Repo`** on the tree, which fails for GitHub archives with no **`.git`**). Then **`bench install-app`** runs **sequentially** on the active site. Apps already installed on the site or already present in the bench are excluded from the picker.
+For each selected app, **`kb`** calls **`GET {license_server}/download/{app}`** with `Authorization: Bearer <JWT>`. If the query string **`v`** is omitted, the license server resolves **GitHub `releases/latest`** for that repository. When you pick **exactly one** app in the menu, **`kb`** asks for an optional **version or tag** (same as **`?v=`** on the server: tag, branch, or commit). When you pick **multiple** apps, downloads always use **latest**. From the shell, use **`kb install --apps <one_app> --version <ref>`** ( **`--version`** is ignored if **`--apps`** lists more than one app). Downloads run **in parallel** (up to 3 at a time); each tarball is extracted under **`apps/<app>/`**, the app is added to **`sites/apps.txt`**, and **`bench setup requirements --python <app>`** installs the app into the bench venv with **pip/uv** (plain **`bench setup requirements <app>`** would open **`git.Repo`** on the tree, which fails for GitHub archives with no **`.git`**). Then **`bench install-app`** runs **sequentially** on the active site. Apps already installed on the site or already present in the bench are excluded from the picker.
 
 You need **`kb activate`** first so a JWT is available. If downloads fail with HTTP 402/403 or upstream errors, ensure the license server has a **GitHub PAT** configured (`github_pat` / `kbls config`) and that the app is in your JWT **`allowed_apps`** list.
 
 ### Add apps to bench
 
-Same **license-server download** path as **Install apps**, but stops after staging apps into the bench (no `install-app` on a site). Use **Manage → Install downloaded apps** to install on a site later. Apps already present in the bench are excluded from the picker.
+Same **license-server download** path as **Install apps** (including **single-app version** / **`--version`** behaviour), but stops after staging apps into the bench (no `install-app` on a site). Use **Manage → Install downloaded apps** to install on a site later. Apps already present in the bench are excluded from the picker.
 
 ### Manage apps
 
@@ -170,8 +170,8 @@ All subcommands accept the global flags listed below unless noted.
 kb                         Interactive main menu (init wizard if ~/.config/kb/config.json is missing)
 kb init                    First-time setup wizard — same fields as Settings (TTY; no --no-input)
 kb config                  Edit ~/.config/kb/config.json interactively (TTY; no --no-input)
-kb install  (alias: i)     Download and install apps on this site (--apps)
-kb add                     Download apps into bench without site installation (--apps)
+kb install  (alias: i)     Download and install apps on this site (--apps, optional --version when one app)
+kb add                     Download apps into bench without site installation (--apps, optional --version when one app)
 kb manage   (alias: m)     Interactive manage submenu (install on site / uninstall / remove)
 kb upgrade  (alias: up)    Update KB apps already in bench via bench update --reset (--apps)
 kb activate (alias: a)     Activate this machine with a KB Pro license key
@@ -190,7 +190,7 @@ License **deactivate** (remove local JWT + key files) is available from the main
 | `--quiet` | `-q` | Suppress informational output |
 | `--verbose` | | Print raw bench output on success |
 | `--no-color` | | Disable colours (also honoured via `NO_COLOR` env var) |
-| `--version` | `-v` | Print version, commit, and build date |
+| `--version` | `-v` | Print **`kb`** binary version, commit, and build date (not the same as **`kb install --version`**, which sets the download Git ref when one app is selected) |
 | `--help` | `-h` | Show help |
 
 ### Non-interactive / CI usage
@@ -211,6 +211,7 @@ Use **`--no-input`** with explicit **`--apps`** where applicable:
 
 ```bash
 kb install --no-input --apps kb_pro,kb_compta
+kb install --no-input --apps kb_pro --version v1.4.0
 kb add     --no-input --apps kb_cheque
 kb upgrade --no-input --apps kb_pro,kb_compta
 kb activate <license-key>          # key as argument, no prompt

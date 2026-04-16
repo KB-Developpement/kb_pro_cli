@@ -94,9 +94,9 @@ func runMainMenu() error {
 		var actionErr error
 		switch choice {
 		case menuInstall:
-			actionErr = runInstall(ctx, site, nil)
+			actionErr = runInstall(ctx, site, nil, "")
 		case menuAdd:
-			actionErr = runAddToBench(ctx, nil)
+			actionErr = runAddToBench(ctx, nil, "")
 		case menuManage:
 			actionErr = runManage(ctx, site, false)
 		case menuUpgrade:
