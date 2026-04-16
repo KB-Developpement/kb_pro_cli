@@ -108,6 +108,19 @@ func SaveTokenCache(token string, activatedAt time.Time) error {
 	return saveCache(entry)
 }
 
+// GetCachedToken returns the raw JWT string from the on-disk license cache.
+// Returns an error if the cache is missing or unreadable.
+func GetCachedToken() (string, error) {
+	e, err := loadCache()
+	if err != nil {
+		return "", err
+	}
+	if e == nil || e.Token == "" {
+		return "", fmt.Errorf("no cached license token found — run: kb activate")
+	}
+	return e.Token, nil
+}
+
 func cachePath() string {
 	return filepath.Join(config.ConfigDir(), licenseCacheFile)
 }

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -75,6 +76,75 @@ func RemoveApp(ctx context.Context, appName string) (string, error) {
 // concurrently — as migrations and builds are bench-wide operations.
 func UpdateApp(ctx context.Context, appName string) (string, error) {
 	return runBench(ctx, "update", "--apps", appName, "--reset")
+}
+
+// GetAppFromArchive installs a new KB app from a .tar.gz source archive.
+//
+// The archive (typically fetched from GitHub via the license server) has a
+// single top-level directory whose name includes the commit hash.  We extract
+// with --strip-components=1 into a temp directory named after the app, then
+// call "bench get-app <dir>" so bench registers the app correctly.
+//
+// The caller is responsible for removing archivePath after this returns.
+func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
+	// Create a temp parent so the extracted directory can be named exactly
+	// after the app — bench uses the directory basename as the app name.
+	tmpParent, err := os.MkdirTemp("", "kb-install-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpParent)
+
+	extractDir := filepath.Join(tmpParent, appName)
+	if err := os.MkdirAll(extractDir, 0755); err != nil {
+		return "", fmt.Errorf("create extract dir: %w", err)
+	}
+
+	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", extractDir, "--strip-components=1")
+	tarCmd.Dir = benchRoot
+	if out, err := tarCmd.CombinedOutput(); err != nil {
+		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
+	}
+
+	return runBench(ctx, "get-app", extractDir)
+}
+
+// UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
+//
+// It atomically replaces the app directory (using a .new sibling within the
+// same filesystem so os.Rename is cheap) and then runs "bench migrate" to
+// apply any schema changes.  Removing stale files from previous versions is
+// handled by the full directory replacement rather than an in-place overlay.
+//
+// The caller is responsible for removing archivePath after this returns.
+func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
+	appDir := filepath.Join(benchRoot, "apps", appName)
+	stagingDir := appDir + ".new"
+
+	// Clean up any leftover staging dir from a previous failed upgrade.
+	_ = os.RemoveAll(stagingDir)
+	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+		return "", fmt.Errorf("create staging dir: %w", err)
+	}
+
+	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", stagingDir, "--strip-components=1")
+	tarCmd.Dir = benchRoot
+	if out, err := tarCmd.CombinedOutput(); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
+	}
+
+	// Atomically replace the app directory. Both paths are within benchRoot
+	// (same filesystem), so os.Rename is an atomic rename(2) syscall.
+	if err := os.RemoveAll(appDir); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return "", fmt.Errorf("remove old app dir: %w", err)
+	}
+	if err := os.Rename(stagingDir, appDir); err != nil {
+		return "", fmt.Errorf("replace app dir: %w", err)
+	}
+
+	return runBench(ctx, "migrate", "--apps", appName)
 }
 
 // runBench executes a bench command from the bench root and returns combined output.

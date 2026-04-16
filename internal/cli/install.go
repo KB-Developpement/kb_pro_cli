@@ -23,7 +23,7 @@ import (
 // newInstallCmd returns the "install" subcommand which downloads and installs
 // selected KB apps on the active Frappe site.
 func newInstallCmd() *cobra.Command {
-	var appsFlag, branchFlag string
+	var appsFlag string
 
 	cmd := &cobra.Command{
 		Use:     "install",
@@ -31,11 +31,13 @@ func newInstallCmd() *cobra.Command {
 		Short:   "Download and install KB apps on this site",
 		Long: `Download and install selected KB-Developpement apps on the active Frappe site.
 
+Apps are fetched from the license server using your active license — no GitHub
+token is required on the client.
+
 Examples:
   kb install                           # Interactive — pick apps from a menu
   kb install --apps kb_app,other_app   # Non-interactive install
   kb install --no-input --apps kb_app  # Scripted / CI usage
-  kb install --branch develop --apps kb_pro   # Non-interactive branch
 `,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,19 +55,18 @@ Examples:
 				fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
 			}
 			preselected := parseAppsFlag(appsFlag)
-			return runInstall(cmd.Context(), site, preselected, branchFlag)
+			return runInstall(cmd.Context(), site, preselected)
 		},
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
-	cmd.Flags().StringVar(&branchFlag, "branch", "", "Git branch passed to bench get-app for each selected app (optional)")
 	return cmd
 }
 
 // newAddCmd returns the "add" subcommand which downloads KB apps into the bench
 // without installing them on any site.
 func newAddCmd() *cobra.Command {
-	var appsFlag, branchFlag string
+	var appsFlag string
 
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -73,10 +74,12 @@ func newAddCmd() *cobra.Command {
 		Long: `Download selected KB-Developpement apps into the bench apps folder.
 Apps downloaded this way can later be installed via "kb manage".
 
+Apps are fetched from the license server using your active license — no GitHub
+token is required on the client.
+
 Examples:
   kb add                           # Interactive — pick apps from a menu
   kb add --apps kb_app,other_app   # Non-interactive
-  kb add --branch develop --apps kb_pro
 `,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -87,12 +90,11 @@ Examples:
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}
 			preselected := parseAppsFlag(appsFlag)
-			return runAddToBench(cmd.Context(), preselected, branchFlag)
+			return runAddToBench(cmd.Context(), preselected)
 		},
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
-	cmd.Flags().StringVar(&branchFlag, "branch", "", "Git branch passed to bench get-app for each selected app (optional)")
 	return cmd
 }
 
@@ -115,75 +117,9 @@ func parseAppsFlag(flag string) []string {
 	return out
 }
 
-// resolveToken returns a GitHub token from env/config, prompting the user if none is found.
-func resolveToken() string {
-	token := config.LoadToken()
-	if token != "" {
-		return token
-	}
-
-	if globalFlags.NoInput {
-		if !globalFlags.Quiet {
-			fmt.Fprintln(os.Stderr, ui.Dim.Render("No GitHub token found. Set KB_GITHUB_TOKEN or use --no-input with a configured token."))
-		}
-		return ""
-	}
-
-	var saveToken bool
-	_ = huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("GitHub Personal Access Token").
-				Description("Required for private repos. Set KB_GITHUB_TOKEN env var to skip this prompt. Tab to next field · Esc to skip").
-				EchoMode(huh.EchoModePassword).
-				Value(&token),
-			huh.NewConfirm().
-				Title("Save token to ~/.config/kb/config.json?").
-				Value(&saveToken),
-		),
-	).WithKeyMap(formKeyMap()).Run()
-
-	if token == "" {
-		if !globalFlags.Quiet {
-			fmt.Fprintln(os.Stderr, ui.Dim.Render("No token provided — private repos may fail."))
-		}
-		return ""
-	}
-
-	// Warn if the token doesn't look like a known GitHub PAT format.
-	if !strings.HasPrefix(token, "ghp_") && !strings.HasPrefix(token, "github_pat_") {
-		fmt.Fprintln(os.Stderr, ui.Dim.Render("Warning: token does not start with 'ghp_' or 'github_pat_' — verify it is a valid GitHub PAT."))
-	}
-
-	if saveToken {
-		if err := config.SaveToken(token); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not save token: %v\n", err)
-		}
-	}
-	return token
-}
-
-// promptOptionalGitBranch asks for a single git ref to pass to every bench get-app
-// in this run. Esc / Ctrl+C returns a non-nil error (caller should abort quietly).
-func promptOptionalGitBranch() (string, error) {
-	var branch string
-	if err := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Git branch (optional)").
-				Description("Applied to all selected apps for bench get-app — leave empty for each repo’s default branch · Esc/Ctrl+C to cancel").
-				Value(&branch),
-		),
-	).WithKeyMap(formKeyMap()).Run(); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(branch), nil
-}
-
 // runInstall downloads and installs selected apps on the given site.
-// preselected, when non-nil, bypasses the interactive selector (used by cobra command / --no-input).
-// branchFlag is used as-is when non-empty; otherwise an interactive user is prompted once.
-func runInstall(ctx context.Context, site string, preselected []string, branchFlag string) error {
+// preselected, when non-nil, bypasses the interactive selector.
+func runInstall(ctx context.Context, site string, preselected []string) error {
 	if err := license.RunSyncCheck(ctx); err != nil {
 		return err
 	}
@@ -191,6 +127,12 @@ func runInstall(ctx context.Context, site string, preselected []string, branchFl
 	if allowedSet == nil {
 		return fmt.Errorf("license required to install apps — run: kb activate")
 	}
+
+	token, err := license.GetCachedToken()
+	if err != nil {
+		return fmt.Errorf("could not read license token: %w", err)
+	}
+	serverURL := config.ResolveLicenseServerURL()
 
 	installed, detectErr := bench.DetectInstalledApps(site)
 	if detectErr != nil && !globalFlags.Quiet {
@@ -231,7 +173,6 @@ func runInstall(ctx context.Context, site string, preselected []string, branchFl
 
 	var selected []string
 	if preselected != nil {
-		// Validate preselected names are installable.
 		selectableByName := indexByName(selectable)
 		for _, name := range preselected {
 			if _, ok := selectableByName[name]; !ok {
@@ -250,17 +191,6 @@ func runInstall(ctx context.Context, site string, preselected []string, branchFl
 		}
 	}
 
-	branch := strings.TrimSpace(branchFlag)
-	if branch == "" && !globalFlags.NoInput {
-		var err error
-		branch, err = promptOptionalGitBranch()
-		if err != nil {
-			return nil
-		}
-	}
-
-	token := resolveToken()
-	appByName := indexByName(selectable)
 	fmt.Fprintln(os.Stdout)
 
 	// --- Phase 1: Download all apps in parallel (up to 3 concurrent) ---
@@ -272,25 +202,26 @@ func runInstall(ctx context.Context, site string, preselected []string, branchFl
 	dlResults := make([]dlResult, len(selected))
 	var mu sync.Mutex
 
-	if branch != "" {
-		fmt.Fprintf(os.Stdout, "Downloading %d app(s) on branch %s…\n", len(selected), branch)
-	} else {
-		fmt.Fprintf(os.Stdout, "Downloading %d app(s)…\n", len(selected))
-	}
+	fmt.Fprintf(os.Stdout, "Downloading %d app(s) from license server…\n", len(selected))
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(3)
 
 	for i, name := range selected {
-		app := appByName[name]
 		g.Go(func() error {
 			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
-			out, err := bench.GetApp(dlCtx, app.URL, token, branch)
-			dlCancel()
+			defer dlCancel()
+
+			tmpPath, dlErr := license.DownloadApp(dlCtx, serverURL, token, name, "")
+			var out string
+			if dlErr == nil {
+				out, dlErr = bench.GetAppFromArchive(dlCtx, tmpPath, name)
+				os.Remove(tmpPath)
+			}
 
 			mu.Lock()
-			dlResults[i] = dlResult{name: name, out: out, err: err}
-			if err != nil {
+			dlResults[i] = dlResult{name: name, out: out, err: dlErr}
+			if dlErr != nil {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), ui.AppName.Render(name))
 			} else {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))
@@ -341,8 +272,7 @@ func runInstall(ctx context.Context, site string, preselected []string, branchFl
 
 // runAddToBench downloads selected apps into the bench without installing them on any site.
 // preselected, when non-nil, bypasses the interactive selector.
-// branchFlag is used when non-empty; otherwise an interactive user is prompted once.
-func runAddToBench(ctx context.Context, preselected []string, branchFlag string) error {
+func runAddToBench(ctx context.Context, preselected []string) error {
 	if err := license.RunSyncCheck(ctx); err != nil {
 		return err
 	}
@@ -350,6 +280,12 @@ func runAddToBench(ctx context.Context, preselected []string, branchFlag string)
 	if allowedSet == nil {
 		return fmt.Errorf("license required to download apps — run: kb activate")
 	}
+
+	token, err := license.GetCachedToken()
+	if err != nil {
+		return fmt.Errorf("could not read license token: %w", err)
+	}
+	serverURL := config.ResolveLicenseServerURL()
 
 	inBench := bench.DetectAppsInBench()
 
@@ -399,17 +335,6 @@ func runAddToBench(ctx context.Context, preselected []string, branchFlag string)
 		}
 	}
 
-	branch := strings.TrimSpace(branchFlag)
-	if branch == "" && !globalFlags.NoInput {
-		var err error
-		branch, err = promptOptionalGitBranch()
-		if err != nil {
-			return nil
-		}
-	}
-
-	token := resolveToken()
-	appByName := indexByName(selectable)
 	fmt.Fprintln(os.Stdout)
 
 	// Download all apps in parallel (up to 3 concurrent).
@@ -421,25 +346,26 @@ func runAddToBench(ctx context.Context, preselected []string, branchFlag string)
 	dlResults := make([]dlResult, len(selected))
 	var mu sync.Mutex
 
-	if branch != "" {
-		fmt.Fprintf(os.Stdout, "Downloading %d app(s) on branch %s…\n", len(selected), branch)
-	} else {
-		fmt.Fprintf(os.Stdout, "Downloading %d app(s)…\n", len(selected))
-	}
+	fmt.Fprintf(os.Stdout, "Downloading %d app(s) from license server…\n", len(selected))
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(3)
 
 	for i, name := range selected {
-		app := appByName[name]
 		g.Go(func() error {
 			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
-			out, err := bench.GetApp(dlCtx, app.URL, token, branch)
-			dlCancel()
+			defer dlCancel()
+
+			tmpPath, dlErr := license.DownloadApp(dlCtx, serverURL, token, name, "")
+			var out string
+			if dlErr == nil {
+				out, dlErr = bench.GetAppFromArchive(dlCtx, tmpPath, name)
+				os.Remove(tmpPath)
+			}
 
 			mu.Lock()
-			dlResults[i] = dlResult{name: name, out: out, err: err}
-			if err != nil {
+			dlResults[i] = dlResult{name: name, out: out, err: dlErr}
+			if dlErr != nil {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Failure.Render("✗"), ui.AppName.Render(name))
 			} else {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))

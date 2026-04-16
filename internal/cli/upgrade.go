@@ -12,6 +12,7 @@ import (
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
+	"github.com/KB-Developpement/kb_pro_cli/internal/config"
 	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
@@ -23,10 +24,11 @@ func newUpgradeCmd() *cobra.Command {
 		Use:     "upgrade",
 		Aliases: []string{"up"},
 		Short:   "Update KB apps already present in the bench",
-		Long: `Pull the latest changes for selected KB apps and migrate all sites.
+		Long: `Download the latest release for selected KB apps and migrate all sites.
 
-Runs "bench update --apps <app> --reset" sequentially for each selected app.
-All apps are attempted even if one fails; a summary is printed at the end.
+Each app is fetched from the license server using your active license and then
+extracted over the existing app directory. "bench migrate" is run afterwards
+to apply any schema changes. Apps are upgraded sequentially.
 
 Examples:
   kb upgrade                          # Interactive — pick from apps in bench
@@ -59,6 +61,12 @@ func runUpgrade(ctx context.Context, preselected []string) error {
 	if allowedSet == nil {
 		return fmt.Errorf("license required to upgrade apps — run: kb activate")
 	}
+
+	token, err := license.GetCachedToken()
+	if err != nil {
+		return fmt.Errorf("could not read license token: %w", err)
+	}
+	serverURL := config.ResolveLicenseServerURL()
 
 	inBench := bench.DetectAppsInBench()
 
@@ -115,14 +123,24 @@ func runUpgrade(ctx context.Context, preselected []string) error {
 	for _, name := range selected {
 		var opOut string
 		var opErr error
+
+		// Each upgrade has its own 15-minute budget covering download + extract + migrate.
 		opCtx, opCancel := context.WithTimeout(ctx, 15*time.Minute)
 		if spinErr := spinner.New().
 			Title(fmt.Sprintf("Upgrading %s…", ui.AppName.Render(name))).
-			Action(func() { opOut, opErr = bench.UpdateApp(opCtx, name) }).
+			Action(func() {
+				var tmpPath string
+				tmpPath, opErr = license.DownloadApp(opCtx, serverURL, token, name, "")
+				if opErr == nil {
+					opOut, opErr = bench.UpdateFromArchive(opCtx, tmpPath, name)
+					os.Remove(tmpPath)
+				}
+			}).
 			Run(); spinErr != nil {
 			opErr = spinErr
 		}
 		opCancel()
+
 		if opErr != nil {
 			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), opErr)
 			if globalFlags.Verbose && opOut != "" {
