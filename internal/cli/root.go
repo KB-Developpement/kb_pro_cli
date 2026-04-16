@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
 	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 	"github.com/KB-Developpement/kb_pro_cli/internal/version"
@@ -145,6 +146,7 @@ func Execute() error {
 	waitForUpdateCheck()
 	license.WaitForCheck()
 	if err != nil {
+		errlog.Log(err)
 		fmt.Fprintln(os.Stderr, err)
 		return err
 	}

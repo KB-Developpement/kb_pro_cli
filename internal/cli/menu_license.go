@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 
+	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
 	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
@@ -51,6 +52,7 @@ func runLicenseMenu() {
 
 		case licMenuActivate:
 			if err := runActivate(nil); err != nil {
+				errlog.Log(err)
 				fmt.Fprintf(os.Stderr, "\n%s %v\n", ui.Failure.Render("Error:"), err)
 			}
 			pause()

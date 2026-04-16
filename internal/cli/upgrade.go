@@ -13,6 +13,7 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
+	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
 	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
@@ -142,6 +143,7 @@ func runUpgrade(ctx context.Context, preselected []string) error {
 		opCancel()
 
 		if opErr != nil {
+			errlog.Logf("upgrade %s: %v", name, opErr)
 			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), opErr)
 			if globalFlags.Verbose && opOut != "" {
 				fmt.Fprintln(os.Stdout, ui.Dim.Render(opOut))

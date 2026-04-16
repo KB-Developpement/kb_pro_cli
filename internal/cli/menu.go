@@ -11,6 +11,7 @@ import (
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
+	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
@@ -110,6 +111,7 @@ func runMainMenu() error {
 		cancel()
 
 		if actionErr != nil {
+			errlog.Log(actionErr)
 			fmt.Fprintf(os.Stderr, "\n%s %v\n", ui.Failure.Render("Error:"), actionErr)
 			pause()
 		}

@@ -122,10 +122,12 @@ func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string
 	}
 
 	out, err := runBench(ctx, "setup", "requirements", "--python", appName)
-	if err != nil && out != "" {
-		return out, fmt.Errorf("%s: %w", out, err)
+	if err != nil {
+		_ = os.RemoveAll(appDir)
+		removeAppFromAppsTxt(root, appName)
+		return "", fmt.Errorf("setup requirements for %s: %w", appName, err)
 	}
-	return out, err
+	return out, nil
 }
 
 // appendAppToAppsTxt adds appName as a line to sites/apps.txt if not already listed.
@@ -154,6 +156,28 @@ func appendAppToAppsTxt(benchRoot, appName string) error {
 	return nil
 }
 
+// removeAppFromAppsTxt removes appName from sites/apps.txt (best-effort cleanup).
+func removeAppFromAppsTxt(benchRoot, appName string) {
+	path := filepath.Join(benchRoot, "sites", "apps.txt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
+	lines := strings.Split(content, "\n")
+	var kept []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) != appName {
+			kept = append(kept, line)
+		}
+	}
+	result := strings.TrimRight(strings.Join(kept, "\n"), "\n")
+	if result != "" {
+		result += "\n"
+	}
+	_ = os.WriteFile(path, []byte(result), 0644)
+}
+
 // UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
 //
 // It atomically replaces the app directory (using a .new sibling within the
@@ -164,7 +188,7 @@ func appendAppToAppsTxt(benchRoot, appName string) error {
 // The caller is responsible for removing archivePath after this returns.
 func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
 	appDir := filepath.Join(benchDir(), "apps", appName)
-	stagingDir := appDir + ".new"
+	stagingDir := appDir + ".kb-new"
 
 	// Clean up any leftover staging dir from a previous failed upgrade.
 	_ = os.RemoveAll(stagingDir)
@@ -189,7 +213,15 @@ func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string
 		return "", fmt.Errorf("replace app dir: %w", err)
 	}
 
-	return runBench(ctx, "migrate", "--apps", appName)
+	// Install/update Python dependencies before migrating — the new version
+	// may have added packages to its requirements or pyproject.
+	if out, err := runBench(ctx, "setup", "requirements", "--python", appName); err != nil {
+		return "", fmt.Errorf("setup requirements for %s: %w", appName, err)
+	} else if out != "" {
+		_ = out // logged by caller when --verbose
+	}
+
+	return runBench(ctx, "migrate")
 }
 
 // runBench executes a bench command from the bench root and returns combined output.

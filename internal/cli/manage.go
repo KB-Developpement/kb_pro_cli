@@ -13,6 +13,7 @@ import (
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
+	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
 	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
@@ -97,6 +98,7 @@ func runManage(ctx context.Context, site string, force bool) error {
 			actionErr = runManageRemove(ctx, site, installed, inBench, force)
 		}
 		if actionErr != nil {
+			errlog.Log(actionErr)
 			fmt.Fprintf(os.Stderr, "\n%s %v\n", ui.Failure.Render("Error:"), actionErr)
 		}
 		pause()
@@ -140,6 +142,7 @@ func runManageInstall(ctx context.Context, site string, installed, inBench map[s
 		}
 		opCancel()
 		if opErr != nil {
+			errlog.Logf("manage install %s: %v", name, opErr)
 			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), opErr)
 		} else {
 			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
@@ -198,6 +201,7 @@ func runManageUninstall(ctx context.Context, site string, installed map[string]b
 		}
 		opCancel()
 		if opErr != nil {
+			errlog.Logf("manage uninstall %s: %v", name, opErr)
 			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), opErr)
 		} else {
 			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
@@ -299,6 +303,7 @@ func runManageRemove(ctx context.Context, site string, installed, inBench map[st
 			}
 		}
 		if opErr != nil {
+			errlog.Logf("manage remove %s: %v", name, opErr)
 			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), opErr)
 		} else {
 			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))

@@ -29,8 +29,10 @@ func InBenchContainer() bool {
 // DetectSiteName attempts to determine the active Frappe site name.
 // It first reads sites/currentsite.txt, then falls back to listing site directories.
 func DetectSiteName() (string, error) {
+	root := benchDir()
+
 	// Primary: currentsite.txt
-	data, err := os.ReadFile(benchDir() + "/sites/currentsite.txt")
+	data, err := os.ReadFile(root + "/sites/currentsite.txt")
 	if err == nil {
 		site := strings.TrimSpace(string(data))
 		if site != "" {
@@ -39,7 +41,7 @@ func DetectSiteName() (string, error) {
 	}
 
 	// Fallback: list directories under sites/, exclude "assets"
-	entries, err := os.ReadDir(benchDir() + "/sites")
+	entries, err := os.ReadDir(root + "/sites")
 	if err != nil {
 		return "", fmt.Errorf("cannot read sites directory: %w", err)
 	}
@@ -53,7 +55,7 @@ func DetectSiteName() (string, error) {
 
 	switch len(sites) {
 	case 0:
-		return "", fmt.Errorf("no sites found in %s/sites", benchDir())
+		return "", fmt.Errorf("no sites found in %s/sites", root)
 	case 1:
 		return sites[0], nil
 	default:

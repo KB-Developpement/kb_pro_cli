@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
+	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
 	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
@@ -199,7 +201,10 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 
 	downloadRef, err := resolveDownloadRef(selected, versionFromFlag, preselected == nil)
 	if err != nil {
-		return nil
+		if errors.Is(err, huh.ErrUserAborted) {
+			return nil
+		}
+		return err
 	}
 
 	fmt.Fprintln(os.Stdout)
@@ -233,6 +238,7 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 			mu.Lock()
 			dlResults[i] = dlResult{name: name, out: out, err: dlErr}
 			if dlErr != nil {
+				errlog.Logf("install download %s: %v", name, dlErr)
 				fmt.Fprintf(os.Stdout, "  %s %s — %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), dlErr)
 			} else {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))
@@ -266,6 +272,7 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 		}
 		opCancel()
 		if installErr != nil {
+			errlog.Logf("install-app %s on %s: %v", dr.name, site, installErr)
 			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(dr.name), installErr)
 		} else {
 			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(dr.name))
@@ -349,7 +356,10 @@ func runAddToBench(ctx context.Context, preselected []string, versionFromFlag st
 
 	downloadRef, err := resolveDownloadRef(selected, versionFromFlag, preselected == nil)
 	if err != nil {
-		return nil
+		if errors.Is(err, huh.ErrUserAborted) {
+			return nil
+		}
+		return err
 	}
 
 	fmt.Fprintln(os.Stdout)
@@ -383,6 +393,7 @@ func runAddToBench(ctx context.Context, preselected []string, versionFromFlag st
 			mu.Lock()
 			dlResults[i] = dlResult{name: name, out: out, err: dlErr}
 			if dlErr != nil {
+				errlog.Logf("add download %s: %v", name, dlErr)
 				fmt.Fprintf(os.Stdout, "  %s %s — %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), dlErr)
 			} else {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))

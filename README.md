@@ -87,7 +87,7 @@ Select one of three actions:
 
 ### Upgrade apps
 
-For each selected app already in the bench, **`kb`** downloads the **latest** release tarball from the license server (same `GET /download/{app}` flow as install), replaces the app directory atomically, then runs **`bench migrate`** to apply schema changes. Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails; a summary is printed at the end.
+For each selected app already in the bench, **`kb`** downloads the **latest** release tarball from the license server (same `GET /download/{app}` flow as install), replaces the app directory atomically, runs **`bench setup requirements --python <app>`** to install any new Python dependencies, then runs **`bench migrate`** to apply schema changes. Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails; a summary is printed at the end.
 
 ```bash
 kb upgrade                          # Interactive — pick from apps currently in bench
@@ -125,7 +125,17 @@ Separately, on commands that run the normal startup license hook, if **`last_che
 
 ### Configuration & credentials
 
-`~/.config/kb/config.json` stores:
+`~/.config/kb/` stores:
+
+| File | Meaning |
+|------|---------|
+| `config.json` | Persistent settings (mode `0600`) — see fields below. |
+| `license.json` | Cached JWT and last-check timestamp (written by activation / heartbeat). |
+| `license.jwt` | Raw JWT mirrored for the Frappe app. |
+| `license_key` | Stored license key (written on first successful activation). |
+| `error.log` | Timestamped log of every error shown to the user (mode `0600`, capped at ~512 KB). |
+
+`config.json` fields:
 
 | Field | Meaning |
 |-------|---------|
