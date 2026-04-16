@@ -48,9 +48,9 @@ func GetApp(ctx context.Context, rawURL, token, branch string) (string, error) {
 	return runBenchWithEnv(ctx, extraEnv, args...)
 }
 
-// InstallApp runs "bench --site <site> install-app <appName> --force".
+// InstallApp runs "bench --site <site> install-app <appName>".
 func InstallApp(ctx context.Context, site, appName string) (string, error) {
-	return runBench(ctx, "--site", site, "install-app", appName, "--force")
+	return runBench(ctx, "--site", site, "install-app", appName)
 }
 
 // UninstallApp runs "bench --site <site> uninstall-app <appName> -y [--force]".
