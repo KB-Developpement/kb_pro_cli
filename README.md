@@ -67,7 +67,7 @@ KB — What would you like to do?
 
 ### Install apps
 
-For each selected app, **`kb`** calls **`GET {license_server}/download/{app}`** with `Authorization: Bearer <JWT>`. If the query string **`v`** is omitted, the license server resolves **GitHub `releases/latest`** for that repository. When you pick **exactly one** app in the menu, **`kb`** asks for an optional **version or tag** (same as **`?v=`** on the server: tag, branch, or commit). When you pick **multiple** apps, downloads always use **latest**. From the shell, use **`kb install --apps <one_app> --version <ref>`** ( **`--version`** is ignored if **`--apps`** lists more than one app). Downloads run **in parallel** (up to 3 at a time); each tarball is extracted under **`apps/<app>/`**, the app is added to **`sites/apps.txt`**, and **`bench setup requirements --python <app>`** installs the app into the bench venv with **pip/uv** (plain **`bench setup requirements <app>`** would open **`git.Repo`** on the tree, which fails for GitHub archives with no **`.git`**). Then **`bench install-app`** runs **sequentially** on the active site. Apps already installed on the site or already present in the bench are excluded from the picker.
+For each selected app, **`kb`** calls **`GET {license_server}/download/{app}`** with `Authorization: Bearer <JWT>`. If the query string **`v`** is omitted, the license server resolves **GitHub `releases/latest`** for that repository. When you pick **exactly one** app in the menu, **`kb`** asks for an optional **version or tag** (same as **`?v=`** on the server: tag, branch, or commit). When you pick **multiple** apps, downloads always use **latest**. From the shell, use **`kb install --apps <one_app> --version <ref>`** ( **`--version`** is ignored if **`--apps`** lists more than one app). Downloads run **in parallel** (up to 3 at a time); each tarball is extracted under **`apps/<app>/`**, the app is added to **`sites/apps.txt`**, and **`bench setup requirements --python <app>`** then **`--node <app>`** install Python (**pip/uv**) and Node dependencies (plain **`bench setup requirements <app>`** would open **`git.Repo`** on the tree, which fails for GitHub archives with no **`.git`**). Then **`bench install-app`** runs **sequentially** on the active site. Apps already installed on the site or already present in the bench are excluded from the picker.
 
 You need **`kb activate`** first so a JWT is available. If downloads fail with HTTP 402/403 or upstream errors, ensure the license server has a **GitHub PAT** configured (`github_pat` / `kbls config`) and that the app is in your JWT **`allowed_apps`** list.
 
@@ -87,7 +87,7 @@ Select one of three actions:
 
 ### Upgrade apps
 
-For each selected app already in the bench, **`kb`** downloads the **latest** release tarball from the license server (same `GET /download/{app}` flow as install), replaces the app directory atomically, runs **`bench setup requirements --python <app>`** to install any new Python dependencies, then runs **`bench migrate`** to apply schema changes. Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails; a summary is printed at the end.
+For each selected app already in the bench, **`kb`** downloads the **latest** release tarball from the license server (same `GET /download/{app}` flow as install), replaces the app directory atomically, runs **`bench setup requirements --python <app>`** then **`--node <app>`** to refresh Python and Node dependencies, then runs **`bench migrate`** to apply schema changes. Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails; a summary is printed at the end.
 
 ```bash
 kb upgrade                          # Interactive — pick from apps currently in bench
@@ -183,7 +183,7 @@ kb config                  Edit ~/.config/kb/config.json interactively (TTY; no 
 kb install  (alias: i)     Download and install apps on this site (--apps, optional --version when one app)
 kb add                     Download apps into bench without site installation (--apps, optional --version when one app)
 kb manage   (alias: m)     Interactive manage submenu (install on site / uninstall / remove)
-kb upgrade  (alias: up)    Update KB apps already in bench via bench update --reset (--apps)
+kb upgrade  (alias: up)    Download latest release and migrate KB apps already in bench (--apps)
 kb activate (alias: a)     Activate this machine with a KB Pro license key
 kb license                 Show current license status (live server check)
 kb update   (alias: u)     Check GitHub and optionally replace the kb binary (see Self-update)

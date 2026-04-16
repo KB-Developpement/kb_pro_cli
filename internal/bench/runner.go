@@ -83,8 +83,8 @@ func UpdateApp(ctx context.Context, appName string) (string, error) {
 // GitHub release tarballs are plain source trees (no `.git`). `bench get-app`
 // and plain `bench setup requirements <app>` construct bench.app.App, which
 // calls git.Repo on the app path and crashes without `.git`. We use
-// `bench setup requirements --python <app>` instead, which runs BenchSetup.python
-// (pip/uv install -e apps/<app>) without that git metadata path.
+// `bench setup requirements --python` and `--node` instead, which install
+// Python and Node dependencies without that git metadata path.
 //
 // The caller is responsible for removing archivePath after this returns.
 func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
@@ -121,13 +121,40 @@ func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string
 		return "", err
 	}
 
-	out, err := runBench(ctx, "setup", "requirements", "--python", appName)
+	out, err := setupRequirementsPythonAndNode(ctx, appName)
 	if err != nil {
 		_ = os.RemoveAll(appDir)
 		removeAppFromAppsTxt(root, appName)
 		return "", fmt.Errorf("setup requirements for %s: %w", appName, err)
 	}
 	return out, nil
+}
+
+// setupRequirementsPythonAndNode runs "bench setup requirements --python" then "--node"
+// for appName. Output strings are joined when both commands produce output.
+func setupRequirementsPythonAndNode(ctx context.Context, appName string) (string, error) {
+	outPy, err := runBench(ctx, "setup", "requirements", "--python", appName)
+	if err != nil {
+		return outPy, err
+	}
+	outNode, err := runBench(ctx, "setup", "requirements", "--node", appName)
+	if err != nil {
+		return combineBenchOutput(outPy, outNode), err
+	}
+	return combineBenchOutput(outPy, outNode), nil
+}
+
+func combineBenchOutput(a, b string) string {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "\n" + b
+	}
 }
 
 // appendAppToAppsTxt adds appName as a line to sites/apps.txt if not already listed.
@@ -213,15 +240,15 @@ func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string
 		return "", fmt.Errorf("replace app dir: %w", err)
 	}
 
-	// Install/update Python dependencies before migrating — the new version
-	// may have added packages to its requirements or pyproject.
-	if out, err := runBench(ctx, "setup", "requirements", "--python", appName); err != nil {
-		return "", fmt.Errorf("setup requirements for %s: %w", appName, err)
-	} else if out != "" {
-		_ = out // logged by caller when --verbose
+	// Install/update Python and Node dependencies before migrating — the new
+	// version may have added packages or JS build deps.
+	reqOut, err := setupRequirementsPythonAndNode(ctx, appName)
+	if err != nil {
+		return reqOut, fmt.Errorf("setup requirements for %s: %w", appName, err)
 	}
 
-	return runBench(ctx, "migrate")
+	migrateOut, err := runBench(ctx, "migrate")
+	return combineBenchOutput(reqOut, migrateOut), err
 }
 
 // runBench executes a bench command from the bench root and returns combined output.
