@@ -149,6 +149,9 @@ func runUpgrade(ctx context.Context, preselected []string) error {
 				fmt.Fprintln(os.Stdout, ui.Dim.Render(opOut))
 			}
 		} else {
+			if syncErr := bench.SyncAppState(name); syncErr != nil && !globalFlags.Quiet {
+				fmt.Fprintf(os.Stderr, "  warning: could not update apps.json for %s: %v\n", name, syncErr)
+			}
 			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
 			if globalFlags.Verbose && opOut != "" {
 				fmt.Fprintln(os.Stdout, ui.Dim.Render(opOut))

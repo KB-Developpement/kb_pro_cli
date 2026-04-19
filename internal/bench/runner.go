@@ -115,22 +115,59 @@ func BuildApp(ctx context.Context, appName string) (string, error) {
 	return runBench(ctx, "build", "--app", appName)
 }
 
-// SyncAppState writes the app's version into sites/apps.json.
-// Branch and commit are left empty since archive-installed apps have no git history.
+// appStateEntry mirrors the schema bench writes in sites/apps.json
+// (bench/bench.py BenchApps.update_apps_states). Archive-installed apps have
+// no git history, so is_repo is always false and resolution is "not a repo".
+type appStateEntry struct {
+	IsRepo     bool     `json:"is_repo"`
+	Resolution string   `json:"resolution"`
+	Required   []string `json:"required"`
+	Idx        int      `json:"idx"`
+	Version    string   `json:"version"`
+}
+
+// SyncAppState writes the app's entry into sites/apps.json using the same
+// schema that bench uses. It reads the file with json.RawMessage so that
+// existing entries (which may contain nested objects, ints, or bools) are
+// preserved exactly — a typed struct unmarshal would fail on mixed types and
+// silently wipe the whole file on the next write.
 func SyncAppState(appName string) error {
 	root := benchDir()
 	path := filepath.Join(root, "sites", "apps.json")
 
-	state := map[string]map[string]string{}
+	// Preserve all existing entries verbatim regardless of their Go types.
+	// If the file exists but is not valid JSON, bail out rather than writing a
+	// file that silently drops every other app's state.
+	state := map[string]json.RawMessage{}
 	if raw, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(raw, &state)
+		if jsonErr := json.Unmarshal(raw, &state); jsonErr != nil {
+			return fmt.Errorf("apps.json is not valid JSON — refusing to overwrite: %w", jsonErr)
+		}
 	}
 
-	state[appName] = map[string]string{
-		"version": readAppVersion(root, appName),
-		"branch":  "",
-		"commit":  "",
+	// Keep the existing idx when re-syncing an already-tracked app.
+	idx := len(state) + 1
+	if existing, ok := state[appName]; ok {
+		var prev struct {
+			Idx int `json:"idx"`
+		}
+		if json.Unmarshal(existing, &prev) == nil && prev.Idx > 0 {
+			idx = prev.Idx
+		}
 	}
+
+	entry := appStateEntry{
+		IsRepo:     false,
+		Resolution: "not a repo",
+		Required:   []string{},
+		Idx:        idx,
+		Version:    readAppVersion(root, appName),
+	}
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	state[appName] = entryJSON
 
 	out, err := json.MarshalIndent(state, "", "\t")
 	if err != nil {
@@ -141,10 +178,11 @@ func SyncAppState(appName string) error {
 
 // UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
 //
-// It atomically replaces the app directory (using a .new sibling within the
-// same filesystem so os.Rename is cheap) and then runs "bench migrate" to
-// apply any schema changes. Removing stale files from previous versions is
-// handled by the full directory replacement rather than an in-place overlay.
+// Steps: atomically replace app directory → bench setup requirements (python +
+// node) → pip install -e → bench build → update apps.json → bench migrate.
+// The directory replacement uses a .kb-new sibling on the same filesystem so
+// os.Rename is a cheap atomic syscall. apps.json sync is best-effort and does
+// not abort the upgrade on failure.
 //
 // The caller is responsible for removing archivePath after this returns.
 func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
@@ -180,8 +218,13 @@ func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string
 		return reqOut, fmt.Errorf("pip install -e for %s: %w", appName, pipErr)
 	}
 
+	buildOut, err := BuildApp(ctx, appName)
+	if err != nil {
+		return combineBenchOutput(reqOut, buildOut), fmt.Errorf("build assets for %s: %w", appName, err)
+	}
+
 	migrateOut, err := runBench(ctx, "migrate")
-	return combineBenchOutput(reqOut, migrateOut), err
+	return combineBenchOutput(reqOut, combineBenchOutput(buildOut, migrateOut)), err
 }
 
 // setupRequirementsPythonAndNode runs "bench setup requirements --python" then "--node".

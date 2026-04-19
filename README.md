@@ -109,7 +109,16 @@ To install already-downloaded apps on a site, use **`kb site-install`** (or **Si
 
 ### Upgrade apps
 
-For each selected app already in the bench, **`kb`** downloads the **latest** release tarball from the license server (same `GET /download/{app}` flow as install), replaces the app directory atomically, runs **`bench setup requirements --python <app>`** then **`--node <app>`** to refresh Python and Node dependencies, then runs **`bench migrate`** to apply schema changes. Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails; a summary is printed at the end.
+For each selected app already in the bench, **`kb`** downloads the **latest** release tarball from the license server (same `GET /download/{app}` flow as install) and runs the full upgrade sequence:
+
+1. Atomically replaces the app directory
+2. **`bench setup requirements --python/--node <app>`** — refreshes Python and Node dependencies
+3. **`pip install -e apps/<app>`** — re-registers the editable package in the bench venv
+4. **`bench build --app <app>`** — recompiles JS/CSS assets
+5. Updates **`sites/apps.json`** with the new version (warning only on failure)
+6. **`bench migrate`** — applies any schema changes
+
+Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails; a summary is printed at the end.
 
 ```bash
 kb upgrade                          # Interactive — pick from apps currently in bench
@@ -117,7 +126,7 @@ kb upgrade --apps kb_pro,kb_compta  # Non-interactive upgrade
 kb upgrade --no-input --apps kb_pro # Scripted / CI usage
 ```
 
-Per-app timeout is **15 minutes** (download + extract + migrate). Use **`--verbose`** for more bench output.
+Per-app timeout is **15 minutes** (download + extract + build + migrate). Use **`--verbose`** for more bench output.
 
 ### License
 
@@ -206,7 +215,7 @@ kb add                     Download apps into bench: extract, pip install -e, bu
 kb site-install            Install already-downloaded apps on this site via bench install-app (--apps)
 kb install  (alias: i)     Download and install apps on this site — combines kb add + kb site-install (--apps, optional --version when one app)
 kb manage   (alias: m)     Interactive manage submenu (uninstall from site / remove from bench)
-kb upgrade  (alias: up)    Download latest release and migrate KB apps already in bench (--apps)
+kb upgrade  (alias: up)    Download latest release, rebuild assets, and migrate KB apps already in bench (--apps)
 kb activate (alias: a)     Activate this machine with a KB Pro license key
 kb license                 Show current license status (live server check)
 kb update   (alias: u)     Check GitHub and optionally replace the kb binary (see Self-update)
