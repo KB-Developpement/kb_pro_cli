@@ -2,51 +2,13 @@ package bench
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
-
-// GetApp runs "bench get-app <url> [--branch <name>]" inside the bench container.
-// If branch is non-empty after trimming, "--branch" is passed to bench get-app.
-// If token is non-empty, credentials are supplied via a temporary git-credentials
-// file (mode 0600) to avoid exposing the token in process arguments.
-// Returns combined stdout+stderr and any error.
-func GetApp(ctx context.Context, rawURL, token, branch string) (string, error) {
-	cloneURL := rawURL
-	var extraEnv []string
-	var cleanup func()
-
-	if token != "" {
-		credsFile, err := writeTempCredentials(rawURL, token)
-		if err == nil {
-			cleanup = func() { os.Remove(credsFile) }
-			extraEnv = []string{
-				"GIT_CONFIG_COUNT=1",
-				"GIT_CONFIG_KEY_0=credential.helper",
-				fmt.Sprintf("GIT_CONFIG_VALUE_0=store --file=%s", credsFile),
-			}
-		} else {
-			// Fallback: embed token in URL when temp-file creation fails.
-			if u, parseErr := url.Parse(rawURL); parseErr == nil {
-				u.User = url.UserPassword("x-access-token", token)
-				cloneURL = u.String()
-			}
-		}
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	args := []string{"get-app", cloneURL}
-	if b := strings.TrimSpace(branch); b != "" {
-		args = append(args, "--branch", b)
-	}
-	return runBenchWithEnv(ctx, extraEnv, args...)
-}
 
 // InstallApp runs "bench --site <site> install-app <appName>".
 func InstallApp(ctx context.Context, site, appName string) (string, error) {
@@ -69,22 +31,12 @@ func RemoveApp(ctx context.Context, appName string) (string, error) {
 	return runBench(ctx, "remove-app", appName)
 }
 
-// UpdateApp runs "bench update --apps <appName> --reset".
-// --reset performs a git reset --hard to the upstream branch (required for shallow clones).
-// This is a long-running operation: it pulls code, updates requirements, migrates all
-// sites, rebuilds JS/CSS assets, and compiles translations. Run sequentially — never
-// concurrently — as migrations and builds are bench-wide operations.
-func UpdateApp(ctx context.Context, appName string) (string, error) {
-	return runBench(ctx, "update", "--apps", appName, "--reset")
-}
-
 // GetAppFromArchive installs a new KB app from a .tar.gz source archive.
 //
 // GitHub release tarballs are plain source trees (no `.git`). `bench get-app`
-// and plain `bench setup requirements <app>` construct bench.app.App, which
-// calls git.Repo on the app path and crashes without `.git`. We use
-// `bench setup requirements --python` and `--node` instead, which install
-// Python and Node dependencies without that git metadata path.
+// crashes on no-git paths, so we use `bench setup requirements` for deps and
+// pip install -e for the editable package registration — matching what
+// bench's own install_app() does after a git clone.
 //
 // The caller is responsible for removing archivePath after this returns.
 func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
@@ -121,27 +73,125 @@ func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string
 		return "", err
 	}
 
-	out, err := setupRequirementsPythonAndNode(ctx, appName)
+	reqOut, err := setupRequirementsPythonAndNode(ctx, appName)
 	if err != nil {
 		_ = os.RemoveAll(appDir)
 		removeAppFromAppsTxt(root, appName)
 		return "", fmt.Errorf("setup requirements for %s: %w", appName, err)
 	}
-	return out, nil
+
+	pipOut, err := PipInstallEditable(ctx, appName)
+	if err != nil {
+		_ = os.RemoveAll(appDir)
+		removeAppFromAppsTxt(root, appName)
+		return "", fmt.Errorf("pip install -e for %s: %w", appName, err)
+	}
+
+	return combineBenchOutput(reqOut, pipOut), nil
 }
 
-// setupRequirementsPythonAndNode runs "bench setup requirements --python" then "--node"
-// for appName. Output strings are joined when both commands produce output.
+// PipInstallEditable registers the app as an editable Python package in the bench venv,
+// mirroring bench's own install_app() logic (uv preferred, pip fallback).
+func PipInstallEditable(ctx context.Context, appName string) (string, error) {
+	root := benchDir()
+	appPath := filepath.Join(root, "apps", appName)
+	python := filepath.Join(root, "env", "bin", "python")
+
+	// Try uv first (faster, no global lock).
+	uvCmd := exec.CommandContext(ctx, python, "-m", "uv", "pip", "install", "--quiet", "--upgrade", "-e", appPath)
+	uvCmd.Dir = root
+	if out, err := uvCmd.CombinedOutput(); err == nil {
+		return strings.TrimSpace(string(out)), nil
+	}
+
+	cmd := exec.CommandContext(ctx, python, "-m", "pip", "install", "--quiet", "--upgrade", "-e", appPath)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// BuildApp runs "bench build --app <appName>" to compile JS/CSS assets.
+func BuildApp(ctx context.Context, appName string) (string, error) {
+	return runBench(ctx, "build", "--app", appName)
+}
+
+// SyncAppState writes the app's version into sites/apps.json.
+// Branch and commit are left empty since archive-installed apps have no git history.
+func SyncAppState(appName string) error {
+	root := benchDir()
+	path := filepath.Join(root, "sites", "apps.json")
+
+	state := map[string]map[string]string{}
+	if raw, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(raw, &state)
+	}
+
+	state[appName] = map[string]string{
+		"version": readAppVersion(root, appName),
+		"branch":  "",
+		"commit":  "",
+	}
+
+	out, err := json.MarshalIndent(state, "", "\t")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0644)
+}
+
+// UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
+//
+// It atomically replaces the app directory (using a .new sibling within the
+// same filesystem so os.Rename is cheap) and then runs "bench migrate" to
+// apply any schema changes. Removing stale files from previous versions is
+// handled by the full directory replacement rather than an in-place overlay.
+//
+// The caller is responsible for removing archivePath after this returns.
+func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
+	appDir := filepath.Join(benchDir(), "apps", appName)
+	stagingDir := appDir + ".kb-new"
+
+	_ = os.RemoveAll(stagingDir)
+	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+		return "", fmt.Errorf("create staging dir: %w", err)
+	}
+
+	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", stagingDir, "--strip-components=1")
+	tarCmd.Dir = filepath.Dir(stagingDir)
+	if out, err := tarCmd.CombinedOutput(); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
+	}
+
+	if err := os.RemoveAll(appDir); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return "", fmt.Errorf("remove old app dir: %w", err)
+	}
+	if err := os.Rename(stagingDir, appDir); err != nil {
+		return "", fmt.Errorf("replace app dir: %w", err)
+	}
+
+	reqOut, err := setupRequirementsPythonAndNode(ctx, appName)
+	if err != nil {
+		return reqOut, fmt.Errorf("setup requirements for %s: %w", appName, err)
+	}
+
+	if _, pipErr := PipInstallEditable(ctx, appName); pipErr != nil {
+		return reqOut, fmt.Errorf("pip install -e for %s: %w", appName, pipErr)
+	}
+
+	migrateOut, err := runBench(ctx, "migrate")
+	return combineBenchOutput(reqOut, migrateOut), err
+}
+
+// setupRequirementsPythonAndNode runs "bench setup requirements --python" then "--node".
 func setupRequirementsPythonAndNode(ctx context.Context, appName string) (string, error) {
 	outPy, err := runBench(ctx, "setup", "requirements", "--python", appName)
 	if err != nil {
 		return outPy, err
 	}
 	outNode, err := runBench(ctx, "setup", "requirements", "--node", appName)
-	if err != nil {
-		return combineBenchOutput(outPy, outNode), err
-	}
-	return combineBenchOutput(outPy, outNode), nil
+	return combineBenchOutput(outPy, outNode), err
 }
 
 func combineBenchOutput(a, b string) string {
@@ -177,10 +227,7 @@ func appendAppToAppsTxt(benchRoot, appName string) error {
 	}
 	b.WriteString(appName)
 	b.WriteByte('\n')
-	if err := os.WriteFile(path, []byte(b.String()), 0644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
+	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
 // removeAppFromAppsTxt removes appName from sites/apps.txt (best-effort cleanup).
@@ -205,95 +252,45 @@ func removeAppFromAppsTxt(benchRoot, appName string) {
 	_ = os.WriteFile(path, []byte(result), 0644)
 }
 
-// UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
-//
-// It atomically replaces the app directory (using a .new sibling within the
-// same filesystem so os.Rename is cheap) and then runs "bench migrate" to
-// apply any schema changes.  Removing stale files from previous versions is
-// handled by the full directory replacement rather than an in-place overlay.
-//
-// The caller is responsible for removing archivePath after this returns.
-func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
-	appDir := filepath.Join(benchDir(), "apps", appName)
-	stagingDir := appDir + ".kb-new"
-
-	// Clean up any leftover staging dir from a previous failed upgrade.
-	_ = os.RemoveAll(stagingDir)
-	if err := os.MkdirAll(stagingDir, 0755); err != nil {
-		return "", fmt.Errorf("create staging dir: %w", err)
+// readAppVersion reads the version string from <app>/<app>/__version__.py,
+// falling back to app_version in <app>/<app>/hooks.py. Returns "" on failure.
+func readAppVersion(benchRoot, appName string) string {
+	candidates := []struct {
+		file   string
+		prefix string
+	}{
+		{filepath.Join(benchRoot, "apps", appName, appName, "__version__.py"), "__version__"},
+		{filepath.Join(benchRoot, "apps", appName, appName, "hooks.py"), "app_version"},
 	}
-
-	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", stagingDir, "--strip-components=1")
-	tarCmd.Dir = filepath.Dir(stagingDir)
-	if out, err := tarCmd.CombinedOutput(); err != nil {
-		_ = os.RemoveAll(stagingDir)
-		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
+	for _, c := range candidates {
+		data, err := os.ReadFile(c.file)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			after, ok := strings.CutPrefix(line, c.prefix)
+			if !ok {
+				continue
+			}
+			after = strings.TrimSpace(after)
+			if strings.HasPrefix(after, "=") {
+				v := strings.TrimSpace(after[1:])
+				return strings.Trim(v, `"'`)
+			}
+		}
 	}
-
-	// Atomically replace the app directory. Both paths are within the bench dir
-	// (same filesystem), so os.Rename is an atomic rename(2) syscall.
-	if err := os.RemoveAll(appDir); err != nil {
-		_ = os.RemoveAll(stagingDir)
-		return "", fmt.Errorf("remove old app dir: %w", err)
-	}
-	if err := os.Rename(stagingDir, appDir); err != nil {
-		return "", fmt.Errorf("replace app dir: %w", err)
-	}
-
-	// Install/update Python and Node dependencies before migrating — the new
-	// version may have added packages or JS build deps.
-	reqOut, err := setupRequirementsPythonAndNode(ctx, appName)
-	if err != nil {
-		return reqOut, fmt.Errorf("setup requirements for %s: %w", appName, err)
-	}
-
-	migrateOut, err := runBench(ctx, "migrate")
-	return combineBenchOutput(reqOut, migrateOut), err
+	return ""
 }
 
 // runBench executes a bench command from the bench root and returns combined output.
 func runBench(ctx context.Context, args ...string) (string, error) {
-	return runBenchWithEnv(ctx, nil, args...)
-}
-
-// runBenchWithEnv executes a bench command with optional extra environment variables
-// appended to the current process environment.
-func runBenchWithEnv(ctx context.Context, extraEnv []string, args ...string) (string, error) {
 	root := benchDir()
 	if _, err := os.Stat(root); err != nil {
 		return "", fmt.Errorf("bench directory %q is not accessible (set KB_BENCH_ROOT to your Frappe bench root): %w", root, err)
 	}
-
 	cmd := exec.CommandContext(ctx, "bench", args...)
 	cmd.Dir = root
-	if len(extraEnv) > 0 {
-		cmd.Env = append(os.Environ(), extraEnv...)
-	}
 	raw, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(raw)), err
-}
-
-// writeTempCredentials writes a git-credentials file (mode 0600) containing
-// an HTTPS credential line for the given URL and token.
-// The caller is responsible for removing the file when done.
-//
-// git-credentials format: https://user:password@host
-func writeTempCredentials(rawURL, token string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("parse url: %w", err)
-	}
-	// os.CreateTemp creates the file with mode 0600 on Unix.
-	f, err := os.CreateTemp("", "kb-git-creds-*")
-	if err != nil {
-		return "", err
-	}
-	name := f.Name()
-	_, writeErr := fmt.Fprintf(f, "%s://x-access-token:%s@%s\n", u.Scheme, token, u.Host)
-	f.Close()
-	if writeErr != nil {
-		os.Remove(name)
-		return "", writeErr
-	}
-	return name, nil
 }

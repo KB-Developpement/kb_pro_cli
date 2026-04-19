@@ -14,12 +14,10 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
-	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
 const (
-	manageInstall   = "install"
 	manageUninstall = "uninstall"
 	manageRemove    = "remove"
 )
@@ -30,12 +28,13 @@ func newManageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "manage",
 		Aliases: []string{"m"},
-		Short:   "Manage KB Frappe apps (install downloaded / uninstall / remove)",
+		Short:   "Manage KB Frappe apps (uninstall / remove from bench)",
 		Long: `Interactively manage KB apps in the bench.
 
-  Install    — bench --site <site> install-app <app>  (for already-downloaded apps)
   Uninstall  — bench --site <site> uninstall-app <app> -y  (removes from site, keeps source)
-  Remove     — uninstall if needed, then bench remove-app <app>  (deletes source)`,
+  Remove     — uninstall if needed, then bench remove-app <app>  (deletes source)
+
+To install already-downloaded apps on a site, use: kb site-install`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireInitializedForCLI(); err != nil {
@@ -59,7 +58,7 @@ func newManageCmd() *cobra.Command {
 	return cmd
 }
 
-// runManage shows a looping submenu for managing KB apps.
+// runManage shows a looping submenu for destructive app management.
 // Esc / Ctrl+C exits the loop and returns nil.
 func runManage(ctx context.Context, site string, force bool) error {
 	for {
@@ -78,7 +77,6 @@ func runManage(ctx context.Context, site string, force bool) error {
 					Title("Manage KB apps").
 					Description("↑/↓ to navigate · Enter to confirm · Esc/Ctrl+C to go back").
 					Options(
-						huh.NewOption("Install downloaded apps  — install on this site", manageInstall),
 						huh.NewOption("Uninstall from site      — keep source in bench", manageUninstall),
 						huh.NewOption("Remove from bench        — uninstall + delete source", manageRemove),
 					).
@@ -90,8 +88,6 @@ func runManage(ctx context.Context, site string, force bool) error {
 
 		var actionErr error
 		switch action {
-		case manageInstall:
-			actionErr = runManageInstall(ctx, site, installed, inBench)
 		case manageUninstall:
 			actionErr = runManageUninstall(ctx, site, installed, force)
 		case manageRemove:
@@ -103,57 +99,6 @@ func runManage(ctx context.Context, site string, force bool) error {
 		}
 		pause()
 	}
-}
-
-// runManageInstall installs already-downloaded apps onto the site.
-func runManageInstall(ctx context.Context, site string, installed, inBench map[string]bool) error {
-	allowedSet := license.AllowedSet()
-	if allowedSet == nil {
-		return fmt.Errorf("license required to install apps — run: kb activate")
-	}
-
-	var selectable []apps.App
-	for _, app := range apps.All {
-		if inBench[app.Name] && !installed[app.Name] && allowedSet[app.Name] {
-			selectable = append(selectable, app)
-		}
-	}
-	if len(selectable) == 0 {
-		fmt.Fprintln(os.Stdout, ui.Dim.Render("No downloaded apps waiting to be installed on site."))
-		return nil
-	}
-
-	selected, err := selectApps(selectable, "Select downloaded apps to install on site")
-	if err != nil || len(selected) == 0 {
-		return nil
-	}
-
-	fmt.Fprintln(os.Stdout)
-	results := make([]installResult, 0, len(selected))
-	for _, name := range selected {
-		var opOut string
-		var opErr error
-		opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
-		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(name), site)).
-			Action(func() { opOut, opErr = bench.InstallApp(opCtx, site, name) }).
-			Run(); spinErr != nil {
-			opErr = spinErr
-		}
-		opCancel()
-		if opErr != nil {
-			errlog.Logf("manage install %s: %v", name, opErr)
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), opErr)
-		} else {
-			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
-			if globalFlags.Verbose && opOut != "" {
-				fmt.Fprintln(os.Stdout, ui.Dim.Render(opOut))
-			}
-		}
-		results = append(results, installResult{name, opErr})
-	}
-	printSummary(results)
-	return nil
 }
 
 // runManageUninstall removes selected apps from the site, keeping their source in the bench.

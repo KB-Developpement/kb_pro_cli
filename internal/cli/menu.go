@@ -16,12 +16,13 @@ import (
 )
 
 const (
-	menuInstall  = "install"
-	menuAdd      = "add"
-	menuManage   = "manage"
-	menuUpgrade  = "upgrade"
-	menuLicense  = "license"
-	menuSettings = "settings"
+	menuInstall      = "install"
+	menuAdd          = "add"
+	menuSiteInstall  = "site-install"
+	menuManage       = "manage"
+	menuUpgrade      = "upgrade"
+	menuLicense      = "license"
+	menuSettings     = "settings"
 )
 
 // clearScreen writes the standard ANSI escape sequence to clear the terminal.
@@ -77,7 +78,8 @@ func runMainMenu() error {
 					Options(
 						huh.NewOption("Install apps          — download and install on this site", menuInstall),
 						huh.NewOption("Add apps to bench     — download only, skip site install", menuAdd),
-						huh.NewOption("Manage apps           — install downloaded / uninstall / remove", menuManage),
+						huh.NewOption("Site-install apps     — install already-downloaded apps on site", menuSiteInstall),
+						huh.NewOption("Manage apps           — uninstall / remove from bench", menuManage),
 						huh.NewOption("Upgrade apps          — pull latest changes and migrate", menuUpgrade),
 						huh.NewOption("License               — status, activate, deactivate locally", menuLicense),
 						huh.NewOption("Settings              — license server URL, GitHub token", menuSettings),
@@ -97,7 +99,9 @@ func runMainMenu() error {
 		case menuInstall:
 			actionErr = runInstall(ctx, site, nil, "")
 		case menuAdd:
-			actionErr = runAddToBench(ctx, nil, "")
+			actionErr = runAdd(ctx, nil, "")
+		case menuSiteInstall:
+			actionErr = runSiteInstall(ctx, site, nil)
 		case menuManage:
 			actionErr = runManage(ctx, site, false)
 		case menuUpgrade:
