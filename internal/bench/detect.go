@@ -81,26 +81,27 @@ func DetectAppsInBench() map[string]bool {
 	return result
 }
 
-// DetectFrappeOrigin checks the git remote of apps/frappe to determine whether
+// DetectFrappeOrigin checks the git remotes of apps/frappe to determine whether
 // it is the stock Frappe repo (frappe/frappe) or the KB fork (KB-Developpement/kb_frappe).
 // Returns (true, nil) for stock Frappe, (false, nil) for the KB fork.
-// Returns a non-nil error when the directory is absent or has an unrecognised remote.
+// Returns a non-nil error when the directory is absent or has no recognisable remote.
+// All remote names are checked (origin, upstream, etc.) to handle different bench setups.
 func DetectFrappeOrigin() (isStock bool, err error) {
 	frappeDir := filepath.Join(benchDir(), "apps", "frappe")
-	cmd := exec.Command("git", "config", "--get", "remote.origin.url")
+	cmd := exec.Command("git", "remote", "-v")
 	cmd.Dir = frappeDir
 	out, runErr := cmd.Output()
 	if runErr != nil {
-		return false, fmt.Errorf("could not read frappe git remote: %w", runErr)
+		return false, fmt.Errorf("could not read frappe git remotes: %w", runErr)
 	}
-	remote := strings.TrimSpace(string(out))
+	remotes := string(out)
 	switch {
-	case strings.Contains(remote, "KB-Developpement/kb_frappe"):
+	case strings.Contains(remotes, "KB-Developpement/kb_frappe"):
 		return false, nil
-	case strings.Contains(remote, "frappe/frappe"):
+	case strings.Contains(remotes, "frappe/frappe"):
 		return true, nil
 	default:
-		return false, fmt.Errorf("unrecognised frappe remote %q — cannot determine Frappe origin", remote)
+		return false, fmt.Errorf("unrecognised frappe remotes — cannot determine Frappe origin")
 	}
 }
 
