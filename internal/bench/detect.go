@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -78,6 +79,29 @@ func DetectAppsInBench() map[string]bool {
 		}
 	}
 	return result
+}
+
+// DetectFrappeOrigin checks the git remote of apps/frappe to determine whether
+// it is the stock Frappe repo (frappe/frappe) or the KB fork (KB-Developpement/kb_frappe).
+// Returns (true, nil) for stock Frappe, (false, nil) for the KB fork.
+// Returns a non-nil error when the directory is absent or has an unrecognised remote.
+func DetectFrappeOrigin() (isStock bool, err error) {
+	frappeDir := filepath.Join(benchDir(), "apps", "frappe")
+	cmd := exec.Command("git", "config", "--get", "remote.origin.url")
+	cmd.Dir = frappeDir
+	out, runErr := cmd.Output()
+	if runErr != nil {
+		return false, fmt.Errorf("could not read frappe git remote: %w", runErr)
+	}
+	remote := strings.TrimSpace(string(out))
+	switch {
+	case strings.Contains(remote, "KB-Developpement/kb_frappe"):
+		return false, nil
+	case strings.Contains(remote, "frappe/frappe"):
+		return true, nil
+	default:
+		return false, fmt.Errorf("unrecognised frappe remote %q — cannot determine Frappe origin", remote)
+	}
 }
 
 // DetectInstalledApps returns a set of app names currently installed on the given site.

@@ -12,17 +12,19 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
 	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
+	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
 const (
-	menuInstall      = "install"
-	menuAdd          = "add"
-	menuSiteInstall  = "site-install"
-	menuManage       = "manage"
-	menuUpgrade      = "upgrade"
-	menuLicense      = "license"
-	menuSettings     = "settings"
+	menuInstall       = "install"
+	menuAdd           = "add"
+	menuSiteInstall   = "site-install"
+	menuManage        = "manage"
+	menuUpgrade       = "upgrade"
+	menuLicense       = "license"
+	menuSettings      = "settings"
+	menuInitKBFrappe  = "init-kb-frappe"
 )
 
 // clearScreen writes the standard ANSI escape sequence to clear the terminal.
@@ -67,6 +69,48 @@ func runMainMenu() error {
 		clearScreen()
 		if !globalFlags.Quiet {
 			fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
+		}
+
+		// Re-check Frappe origin each iteration so the menu updates after Init KB Frappe runs.
+		isStock, frappeErr := bench.DetectFrappeOrigin()
+		if frappeErr == nil && isStock {
+			if !license.AllowedSet()["kb_frappe"] {
+				return fmt.Errorf("this bench has stock Frappe but your license does not allow kb_frappe — contact KB to update your license")
+			}
+
+			var choice string
+			if err := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("KB — What would you like to do?").
+						Description("↑/↓ to navigate · Enter to confirm · Esc/Ctrl+C to cancel").
+						Options(
+							huh.NewOption("Init KB Frappe        — replace stock Frappe with KB fork", menuInitKBFrappe),
+							huh.NewOption("License               — status, activate, deactivate locally", menuLicense),
+							huh.NewOption("Settings              — license server URL, GitHub token", menuSettings),
+						).
+						Value(&choice),
+				),
+			).WithKeyMap(formKeyMap()).Run(); err != nil {
+				return nil // Esc / Ctrl+C — exit to shell
+			}
+
+			switch choice {
+			case menuInitKBFrappe:
+				// Init KB Frappe runs bench build + migrate which can take well over
+				// 10 minutes on a first run — use an unbounded context like runUpgrade.
+				actionErr := runInitKBFrappe(context.Background())
+				if actionErr != nil {
+					errlog.Log(actionErr)
+					fmt.Fprintf(os.Stderr, "\n%s %v\n", ui.Failure.Render("Error:"), actionErr)
+				}
+			case menuLicense:
+				runLicenseMenu()
+			case menuSettings:
+				runConfigEdit()
+			}
+			pause()
+			continue
 		}
 
 		var choice string

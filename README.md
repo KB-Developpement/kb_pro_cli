@@ -55,6 +55,17 @@ kb
 
 The main menu lists every top-level action. After each action you return here — press **`Esc`** or **`Ctrl+C`** to exit to the shell. Nested menus (**Manage**, **License**) use the same keys to go back.
 
+On a **fresh bench** where `apps/frappe` is still the stock `frappe/frappe` repo, the menu shows a reduced set of options until the KB Frappe fork is in place — **License** and **Settings** are always available so you can activate your license before running Init KB Frappe:
+
+```
+KB — What would you like to do?
+  > Init KB Frappe        — replace stock Frappe with KB fork
+    License               — status, activate, deactivate locally
+    Settings              — license server URL, GitHub token
+```
+
+Once the fork is installed the full menu appears:
+
 ```
 KB — What would you like to do?
   > Install apps          — download and install on this site
@@ -65,6 +76,21 @@ KB — What would you like to do?
     License               — status, activate, deactivate locally
     Settings              — license server URL, optional GitHub token (legacy field)
 ```
+
+### Init KB Frappe
+
+Shown **only** when `apps/frappe` is the stock `frappe/frappe` repo (detected via the git remote). If your license does not include `kb_frappe`, an error is shown and the menu exits — contact KB to update your license.
+
+When selected, `kb`:
+
+1. Downloads the private `kb_frappe` tarball from the license server (`GET /download/kb_frappe`)
+2. Atomically replaces `apps/frappe` in-place — the directory remains named `frappe`
+3. Runs `bench setup requirements --python/--node frappe`, `pip install -e apps/frappe`, `bench build --app frappe`, and `bench migrate`
+4. Updates `sites/apps.json` with the new version
+
+After this completes the full 7-option menu is available on the next iteration. `kb_frappe` is a private fork of `frappe/frappe`; its Python package name and on-disk directory remain `frappe` — nothing in any installed app needs to change.
+
+> **Note:** This operation has no timeout — `bench build` and `bench migrate` on a fresh Frappe install can take 15+ minutes.
 
 ### Install apps
 
@@ -190,18 +216,19 @@ The wizard may still collect a PAT for historical reasons; it is **not** used fo
 
 Names and default **tier** metadata (authoritative allowed list is always the **`allowed_apps`** claim in your JWT):
 
-| App | Repository | Default tier |
-|-----|------------|--------------|
-| `kb_pro` | KB-Developpement/kb_pro | standard |
-| `kb_compta` | KB-Developpement/kb_compta | standard |
-| `kb_cheque` | KB-Developpement/kb_cheque | standard |
-| `kb_facilite` | KB-Developpement/kb_facilite | standard |
-| `kb_print` | KB-Developpement/kb_print | standard |
-| `kb_stock` | KB-Developpement/kb_stock | standard |
-| `HR2025` | KB-Developpement/HR2025 | full |
-| `kb_distri` | KB-Developpement/kb_distri | full |
-| `kb_commercial` | KB-Developpement/kb_commercial | full |
-| `AchatsExtern` | KB-Developpement/AchatsExtern | full |
+| App | Repository | Default tier | Notes |
+|-----|------------|--------------|-------|
+| `kb_frappe` | KB-Developpement/kb_frappe | standard | Replaces stock `frappe` via **Init KB Frappe** — not selectable in normal install/upgrade pickers |
+| `kb_pro` | KB-Developpement/kb_pro | standard | |
+| `kb_compta` | KB-Developpement/kb_compta | standard | |
+| `kb_cheque` | KB-Developpement/kb_cheque | standard | |
+| `kb_facilite` | KB-Developpement/kb_facilite | standard | |
+| `kb_print` | KB-Developpement/kb_print | standard | |
+| `kb_stock` | KB-Developpement/kb_stock | standard | |
+| `HR2025` | KB-Developpement/HR2025 | full | |
+| `kb_distri` | KB-Developpement/kb_distri | full | |
+| `kb_commercial` | KB-Developpement/kb_commercial | full | |
+| `AchatsExtern` | KB-Developpement/AchatsExtern | full | |
 
 ## Commands
 
