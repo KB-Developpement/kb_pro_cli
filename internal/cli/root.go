@@ -30,7 +30,8 @@ func newRootCmd() *cobra.Command {
 
 Run inside a Frappe bench container (via ffm shell) to install, add,
 or manage apps from the KB-Developpement GitHub organisation.`,
-		SilenceUsage: true,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		Version: fmt.Sprintf("%s (commit %s, built %s)",
 			version.Version, version.Commit, version.Date),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -148,7 +149,7 @@ func Execute() error {
 	license.WaitForCheck()
 	if err != nil {
 		errlog.Log(err)
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		return err
 	}
 	return nil

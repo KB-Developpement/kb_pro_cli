@@ -21,6 +21,9 @@ func runInitKBFrappe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if !license.AllowedSet()["kb_frappe"] {
+		return fmt.Errorf("your license does not allow kb_frappe — contact KB to update your license")
+	}
 
 	var archivePath string
 	if spinErr := spinner.New().

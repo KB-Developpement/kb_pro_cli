@@ -12,7 +12,6 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
 	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
-	"github.com/KB-Developpement/kb_pro_cli/internal/license"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
@@ -74,10 +73,10 @@ func runMainMenu() error {
 		// Re-check Frappe origin each iteration so the menu updates after Init KB Frappe runs.
 		isStock, frappeErr := bench.DetectFrappeOrigin()
 		if frappeErr == nil && isStock {
-			if !license.AllowedSet()["kb_frappe"] {
-				return fmt.Errorf("this bench has stock Frappe but your license does not allow kb_frappe — contact KB to update your license")
-			}
-
+			// License + Settings are always shown so a freshly-installed bench can
+			// reach activation. Init KB Frappe enforces its own license check
+			// inside runInitKBFrappe and surfaces a clear error if kb_frappe is
+			// not in the activated allowed_apps.
 			var choice string
 			if err := huh.NewForm(
 				huh.NewGroup(
