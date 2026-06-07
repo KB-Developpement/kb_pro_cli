@@ -28,11 +28,16 @@ func InBenchContainer() bool {
 }
 
 // DetectSiteName attempts to determine the active Frappe site name.
-// It first reads sites/currentsite.txt, then falls back to listing site directories.
+// It reads sites/common_site_config.json (default_site), then legacy currentsite.txt,
+// then falls back to listing site directories.
 func DetectSiteName() (string, error) {
 	root := benchDir()
 
-	// Primary: currentsite.txt
+	if site, err := defaultSiteFromCommonConfig(filepath.Join(root, "sites", "common_site_config.json")); err == nil && site != "" {
+		return site, nil
+	}
+
+	// Legacy: currentsite.txt
 	data, err := os.ReadFile(root + "/sites/currentsite.txt")
 	if err == nil {
 		site := strings.TrimSpace(string(data))
@@ -41,17 +46,10 @@ func DetectSiteName() (string, error) {
 		}
 	}
 
-	// Fallback: list directories under sites/, exclude "assets"
-	entries, err := os.ReadDir(root + "/sites")
+	// Fallback: list site directories (must contain site_config.json).
+	sites, err := listFrappeSiteDirs(filepath.Join(root, "sites"))
 	if err != nil {
-		return "", fmt.Errorf("cannot read sites directory: %w", err)
-	}
-
-	var sites []string
-	for _, e := range entries {
-		if e.IsDir() && e.Name() != "assets" {
-			sites = append(sites, e.Name())
-		}
+		return "", err
 	}
 
 	switch len(sites) {
@@ -63,6 +61,42 @@ func DetectSiteName() (string, error) {
 		return "", fmt.Errorf("multiple sites found (%s); set the active site with: bench use <site>",
 			strings.Join(sites, ", "))
 	}
+}
+
+func defaultSiteFromCommonConfig(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var cfg struct {
+		DefaultSite string `json:"default_site"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(cfg.DefaultSite), nil
+}
+
+// listFrappeSiteDirs returns site folder names under sitesRoot that contain site_config.json.
+// Non-site directories (assets, __pycache__, etc.) are ignored.
+func listFrappeSiteDirs(sitesRoot string) ([]string, error) {
+	entries, err := os.ReadDir(sitesRoot)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read sites directory: %w", err)
+	}
+
+	var sites []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		cfg := filepath.Join(sitesRoot, e.Name(), "site_config.json")
+		info, statErr := os.Stat(cfg)
+		if statErr == nil && !info.IsDir() {
+			sites = append(sites, e.Name())
+		}
+	}
+	return sites, nil
 }
 
 // DetectAppsInBench returns a set of app names whose source folder exists under bench/apps/.

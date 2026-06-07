@@ -160,6 +160,10 @@ func runUpgrade(ctx context.Context, preselected []string) error {
 		results = append(results, installResult{name, opErr})
 	}
 
+	if anySucceeded(results) {
+		fmt.Fprintln(os.Stdout)
+		maybeRestartDevServer(ctx)
+	}
 	printSummary(results)
 	pause()
 	return nil

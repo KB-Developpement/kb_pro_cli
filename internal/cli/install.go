@@ -238,6 +238,10 @@ func runSiteInstall(ctx context.Context, site string, preselected []string) erro
 
 	fmt.Fprintln(os.Stdout)
 	results := siteInstallApps(ctx, site, selected)
+	if anySucceeded(results) {
+		fmt.Fprintln(os.Stdout)
+		maybeRestartDevServer(ctx)
+	}
 	printSummary(results)
 	pause()
 	return nil
@@ -339,6 +343,10 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 		installResults = append(installResults, installResult{r.name, installErr})
 	}
 
+	if anySucceeded(installResults) {
+		fmt.Fprintln(os.Stdout)
+		maybeRestartDevServer(ctx)
+	}
 	printSummary(installResults)
 	pause()
 	return nil
@@ -587,6 +595,33 @@ func selectApps(selectable []apps.App, title string) ([]string, error) {
 		fmt.Fprintln(os.Stdout, ui.Dim.Render("No apps selected."))
 	}
 	return selected, nil
+}
+
+// anySucceeded returns true if at least one result has no error.
+func anySucceeded(results []installResult) bool {
+	for _, r := range results {
+		if r.err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// maybeRestartDevServer restarts honcho if running (dev bench), or prints a
+// warning if prod web processes are running. Silent when nothing is running.
+func maybeRestartDevServer(ctx context.Context) {
+	if bench.IsDevServerRunning() {
+		var restarted bool
+		_ = spinner.New().
+			Title("Restarting dev server…").
+			Action(func() { restarted, _ = bench.RestartDevServerIfRunning(ctx) }).
+			Run()
+		if restarted {
+			fmt.Fprintln(os.Stdout, ui.Success.Render("✓")+" Dev server restarted.")
+		}
+	} else if bench.IsProdWebServerRunning() {
+		fmt.Fprintln(os.Stdout, ui.Warn.Render("!")+" Restart the bench services to apply changes.")
+	}
 }
 
 // indexByName builds a name → App lookup map.

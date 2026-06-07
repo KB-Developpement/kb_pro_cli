@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // InstallApp runs "bench --site <site> install-app <appName>".
@@ -324,6 +325,40 @@ func readAppVersion(benchRoot, appName string) string {
 		}
 	}
 	return ""
+}
+
+// IsDevServerRunning reports whether the bench dev server (honcho) is running.
+func IsDevServerRunning() bool {
+	return exec.Command("pgrep", "-f", "honcho start").Run() == nil
+}
+
+// IsProdWebServerRunning reports whether a production web server (gunicorn) is
+// running without honcho — i.e. the bench is in prod mode.
+func IsProdWebServerRunning() bool {
+	if IsDevServerRunning() {
+		return false
+	}
+	return exec.Command("pgrep", "-f", "gunicorn").Run() == nil
+}
+
+// RestartDevServerIfRunning restarts bench start (honcho) if it is currently
+// running. Call after app install/upgrade so the dev server picks up new Python
+// packages, DocTypes, and schema changes from the running process.
+// Returns (false, nil) when the server is not running (prod bench, manually
+// stopped) — safe to call unconditionally.
+func RestartDevServerIfRunning(ctx context.Context) (bool, error) {
+	if err := exec.CommandContext(ctx, "pgrep", "-f", "honcho start").Run(); err != nil {
+		return false, nil // not running — no-op
+	}
+	_ = exec.CommandContext(ctx, "pkill", "-f", "honcho start").Run()
+	time.Sleep(time.Second)
+	root := benchDir()
+	cmd := exec.Command("bash", "-c",
+		fmt.Sprintf("cd %s && nohup bench start >> /home/frappe/bench-start.log 2>&1 &", root))
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("restart bench start: %w", err)
+	}
+	return true, nil
 }
 
 // runBench executes a bench command from the bench root and returns combined output.
