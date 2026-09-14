@@ -48,7 +48,7 @@ func pause() {
 
 func runMainMenu() error {
 	ensureFirstRunSetup()
-	if !config.IsInitialized() {
+	if !config.IsConfigured() {
 		return nil
 	}
 

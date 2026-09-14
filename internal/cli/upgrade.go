@@ -164,7 +164,7 @@ func runUpgrade(ctx context.Context, preselected []string) error {
 		fmt.Fprintln(os.Stdout)
 		maybeRestartDevServer(ctx)
 	}
-	printSummary(results)
+	failures := printSummary(results)
 	pause()
-	return nil
+	return summaryError(failures, len(results))
 }

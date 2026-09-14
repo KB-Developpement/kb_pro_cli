@@ -68,7 +68,7 @@ func ensureFirstRunSetup() {
 	if globalFlags.NoInput || !isatty.IsTerminal(os.Stdin.Fd()) {
 		return
 	}
-	if config.IsInitialized() {
+	if config.IsConfigured() {
 		return
 	}
 	runInit()
@@ -78,7 +78,7 @@ func ensureFirstRunSetup() {
 // errors if the user still has no stored settings (e.g. cancelled the form).
 func requireInitializedForCLI() error {
 	ensureFirstRunSetup()
-	if !config.IsInitialized() {
+	if !config.IsConfigured() {
 		return fmt.Errorf("configuration required — run kb init or kb (interactive menu) to set the license server URL and optional GitHub token")
 	}
 	return nil

@@ -43,7 +43,7 @@ func runLicenseStatus(ctx context.Context) error {
 	}
 
 	if !state.Valid {
-		fmt.Fprintln(os.Stdout, ui.Failure.Render("License expired."))
+		fmt.Fprintln(os.Stdout, ui.Failure.Render("License token expired."))
 		fmt.Fprintf(os.Stdout, "  Expired:  %s\n", state.ExpiresAt.Format(time.RFC3339))
 		fmt.Fprintln(os.Stdout, ui.Dim.Render("Run: kb activate — to reactivate."))
 		return nil
@@ -52,7 +52,8 @@ func runLicenseStatus(ctx context.Context) error {
 	fmt.Fprintln(os.Stdout, ui.Success.Render("License active"))
 	fmt.Fprintf(os.Stdout, "  Client:   %s\n", state.ClientID)
 	fmt.Fprintf(os.Stdout, "  Tier:     %s\n", state.Tier)
-	fmt.Fprintf(os.Stdout, "  Expires:  %s\n", state.ExpiresAt.Format("2006-01-02"))
+	fmt.Fprintf(os.Stdout, "  Token valid until: %s\n", state.ExpiresAt.Format("2006-01-02"))
+	fmt.Fprintln(os.Stdout, ui.Dim.Render("  (license token; renewed automatically on heartbeat — contract dates are managed by KB-Developpement)"))
 	fmt.Fprintf(os.Stdout, "  Apps:     %s\n", strings.Join(state.AllowedApps, ", "))
 	return nil
 }

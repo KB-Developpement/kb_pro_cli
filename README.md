@@ -40,6 +40,8 @@ You can run the same wizard anytime with **`kb init`**, or edit values with **`k
 
 If you cancel the wizard before saving, the bare **`kb`** menu does not open until setup is complete.
 
+Setup is also considered complete when **`KB_LICENSE_SERVER`** is set, so containers and CI can run **`kb install --no-input`** with no `config.json` on disk.
+
 **`kb activate`**, **`kb license`**, and **`kb update --check`** do **not** require `config.json`. Activation uses the stored license server URL (or the built-in default) unless you set **`KB_LICENSE_SERVER`**.
 
 **`KB_BENCH_ROOT`** — optional. `kb install` / `kb add` / `kb upgrade` run `bench` with working directory **`/workspace/frappe-bench`** by default (the path inside the standard dev container). If your bench root differs, set **`KB_BENCH_ROOT`** to that absolute path.

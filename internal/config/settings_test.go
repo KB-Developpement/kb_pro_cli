@@ -58,3 +58,26 @@ func TestResolveLicenseServerURLStored(t *testing.T) {
 		t.Fatalf("ResolveLicenseServerURL: got %q", got)
 	}
 }
+
+func TestIsConfiguredUsesLicenseServerEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KB_LICENSE_SERVER", "")
+
+	if IsConfigured() {
+		t.Fatal("IsConfigured: want false with no config.json and no KB_LICENSE_SERVER")
+	}
+
+	t.Setenv("KB_LICENSE_SERVER", "https://license.example.test")
+	if IsInitialized() {
+		t.Fatal("IsInitialized: want false — env var must not create config.json")
+	}
+	if !IsConfigured() {
+		t.Fatal("IsConfigured: want true when KB_LICENSE_SERVER is set")
+	}
+
+	t.Setenv("KB_LICENSE_SERVER", "   ")
+	if IsConfigured() {
+		t.Fatal("IsConfigured: want false when KB_LICENSE_SERVER is blank")
+	}
+}

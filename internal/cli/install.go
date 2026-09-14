@@ -202,9 +202,9 @@ func runAdd(ctx context.Context, preselected []string, versionFromFlag string) e
 	dlResults := downloadApps(ctx, selected, downloadRef, serverURL, token)
 
 	results := postDownloadSteps(ctx, dlResults, true)
-	printSummary(results)
+	failures := printSummary(results)
 	pause()
-	return nil
+	return summaryError(failures, len(results))
 }
 
 // runSiteInstall installs already-downloaded apps onto the given site.
@@ -242,9 +242,9 @@ func runSiteInstall(ctx context.Context, site string, preselected []string) erro
 		fmt.Fprintln(os.Stdout)
 		maybeRestartDevServer(ctx)
 	}
-	printSummary(results)
+	failures := printSummary(results)
 	pause()
-	return nil
+	return summaryError(failures, len(results))
 }
 
 // runInstall downloads selected apps and installs them on the site in one step.
@@ -347,9 +347,9 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 		fmt.Fprintln(os.Stdout)
 		maybeRestartDevServer(ctx)
 	}
-	printSummary(installResults)
+	failures := printSummary(installResults)
 	pause()
-	return nil
+	return summaryError(failures, len(installResults))
 }
 
 // ── Shared download + post-download helpers ───────────────────────────────────
@@ -639,7 +639,8 @@ type installResult struct {
 }
 
 // printSummary prints success/failure counts and any failed app names.
-func printSummary(results []installResult) {
+// It returns the number of failed apps so callers can exit non-zero.
+func printSummary(results []installResult) int {
 	fmt.Fprintln(os.Stdout)
 	successes, failures := 0, 0
 	for _, r := range results {
@@ -659,4 +660,14 @@ func printSummary(results []installResult) {
 			}
 		}
 	}
+	return failures
+}
+
+// summaryError converts a failure count into the error returned by the runners,
+// so scripted/CI invocations exit non-zero when at least one app failed.
+func summaryError(failures, total int) error {
+	if failures == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d of %d app(s) failed", failures, total)
 }

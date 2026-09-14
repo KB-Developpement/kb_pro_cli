@@ -34,6 +34,16 @@ func IsInitialized() bool {
 	return err == nil
 }
 
+// IsConfigured reports whether the CLI has enough configuration to run without
+// the interactive wizard: either config.json exists, or KB_LICENSE_SERVER is set
+// (containers and CI configure the server purely from the environment).
+func IsConfigured() bool {
+	if IsInitialized() {
+		return true
+	}
+	return strings.TrimSpace(os.Getenv("KB_LICENSE_SERVER")) != ""
+}
+
 // LoadStoredSettings reads persisted settings from config.json only.
 // It does not read environment variables (use LoadToken / ResolveLicenseServerURL for runtime).
 // A missing file returns zero StoredSettings and no error.
