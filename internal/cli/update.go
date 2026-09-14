@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
@@ -61,8 +64,16 @@ Examples:
 	return cmd
 }
 
-// githubHTTPClient is a shared resty client for GitHub API and release downloads.
-var githubHTTPClient = resty.New().SetHeader("Accept", "application/vnd.github+json")
+// githubHTTPClient is a shared resty client for GitHub API calls. resty has no
+// default timeout, so set one explicitly — without it `kb update` and the
+// background release check can hang indefinitely.
+var githubHTTPClient = resty.New().
+	SetHeader("Accept", "application/vnd.github+json").
+	SetTimeout(30 * time.Second)
+
+// githubDownloadClient fetches release assets, which are much larger than an
+// API response and need a longer ceiling.
+var githubDownloadClient = resty.New().SetTimeout(5 * time.Minute)
 
 func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 	current := version.Version
@@ -130,11 +141,13 @@ func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 	}
 
 	target := releaseAssetName(latest)
-	var downloadURL string
+	var downloadURL, checksumsURL string
 	for _, a := range release.Assets {
-		if a.Name == target {
+		switch a.Name {
+		case target:
 			downloadURL = a.BrowserDownloadURL
-			break
+		case checksumsAssetName:
+			checksumsURL = a.BrowserDownloadURL
 		}
 	}
 	if downloadURL == "" {
@@ -161,7 +174,7 @@ func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 	_ = spinner.New().
 		Title(fmt.Sprintf("Downloading kb %s…", latest)).
 		Action(func() {
-			installErr = downloadAndInstall(downloadURL)
+			installErr = downloadAndInstall(downloadURL, checksumsURL, target)
 		}).
 		Run()
 	if installErr != nil {
@@ -174,13 +187,33 @@ func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 	return nil
 }
 
-func downloadAndInstall(downloadURL string) error {
-	resp, err := githubHTTPClient.R().Get(downloadURL)
+// checksumsAssetName is the checksum manifest GoReleaser publishes with every
+// release (see .goreleaser.yaml `checksum.name_template`).
+const checksumsAssetName = "checksums.txt"
+
+func downloadAndInstall(downloadURL, checksumsURL, assetName string) error {
+	if checksumsURL == "" {
+		return fmt.Errorf("release has no %s asset — refusing to install an unverified binary", checksumsAssetName)
+	}
+
+	sumsResp, err := githubDownloadClient.R().Get(checksumsURL)
+	if err != nil {
+		return fmt.Errorf("downloading %s: %w", checksumsAssetName, err)
+	}
+	if sumsResp.StatusCode() != 200 {
+		return fmt.Errorf("downloading %s failed: HTTP %d", checksumsAssetName, sumsResp.StatusCode())
+	}
+
+	resp, err := githubDownloadClient.R().Get(downloadURL)
 	if err != nil {
 		return fmt.Errorf("downloading: %w", err)
 	}
 	if resp.StatusCode() != 200 {
 		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode())
+	}
+
+	if err := verifyChecksum(resp.Body(), sumsResp.Body(), assetName); err != nil {
+		return err
 	}
 
 	binData, err := extractFromTarGz(resp.Body(), "kb")
@@ -227,6 +260,43 @@ func replaceBinary(newData []byte) error {
 		return fmt.Errorf("replacing binary: %w", err)
 	}
 	return nil
+}
+
+// verifyChecksum compares the SHA-256 of data against the entry for assetName
+// in a GoReleaser checksums.txt body. Any missing entry is a hard failure —
+// an unverifiable download is never installed.
+func verifyChecksum(data, checksums []byte, assetName string) error {
+	want, err := checksumFor(checksums, assetName)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	got := hex.EncodeToString(sum[:])
+	if got != want {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s — refusing to install", assetName, want, got)
+	}
+	return nil
+}
+
+// checksumFor returns the hex SHA-256 recorded for assetName in a
+// "<hex>  <filename>" checksum manifest.
+func checksumFor(checksums []byte, assetName string) (string, error) {
+	for _, line := range strings.Split(string(checksums), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) != 2 {
+			continue
+		}
+		if strings.TrimPrefix(fields[1], "*") != assetName {
+			continue
+		}
+		sum := strings.ToLower(fields[0])
+		raw, err := hex.DecodeString(sum)
+		if err != nil || len(raw) != sha256.Size {
+			return "", fmt.Errorf("malformed checksum entry for %s in %s", assetName, checksumsAssetName)
+		}
+		return sum, nil
+	}
+	return "", fmt.Errorf("no checksum entry for %s in %s — refusing to install an unverified binary", assetName, checksumsAssetName)
 }
 
 // releaseAssetName returns the GoReleaser archive filename for the current platform.

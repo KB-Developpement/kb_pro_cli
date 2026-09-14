@@ -146,6 +146,8 @@ For each selected app already in the bench, **`kb`** downloads the **latest** re
 
 Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails; a summary is printed at the end.
 
+The previous app source is kept as `apps/<app>.kb-old` for the duration of the upgrade: if any step before `bench migrate` fails, the new directory is removed, the previous source is restored in place, `pip install -e` is re-run on it, and the error says the previous version was restored. If `bench migrate` itself fails nothing is rolled back (the schema may be half-applied) — `apps/<app>.kb-old` is kept and its path is printed in the error so you can recover the previous source manually.
+
 ```bash
 kb upgrade                          # Interactive — pick from apps currently in bench
 kb upgrade --apps kb_pro,kb_compta  # Non-interactive upgrade

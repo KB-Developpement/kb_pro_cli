@@ -56,6 +56,16 @@ func RunCheck() {
 		return
 	}
 
+	// Machine binding: a license.json copied from another machine must not be
+	// honoured until a heartbeat happens to run. If the local fingerprint can be
+	// computed and the token is bound to a different one, treat the cache as
+	// invalid immediately. A fingerprint error keeps the previous behaviour
+	// (grace period) — see doHeartbeat.
+	if fp, fpErr := Fingerprint(); fpErr == nil && c.Fingerprint != "" && c.Fingerprint != fp {
+		handleHeartbeatError("fingerprint_mismatch")
+		return
+	}
+
 	now := time.Now()
 	state := &State{
 		Valid:       !isExpired(c, now),

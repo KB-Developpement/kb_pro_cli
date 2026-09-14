@@ -180,10 +180,17 @@ func SyncAppState(appName string) error {
 // UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
 //
 // Steps: atomically replace app directory → bench setup requirements (python +
-// node) → pip install -e → bench build → update apps.json → bench migrate.
-// The directory replacement uses a .kb-new sibling on the same filesystem so
-// os.Rename is a cheap atomic syscall. apps.json sync is best-effort and does
-// not abort the upgrade on failure.
+// node) → pip install -e → bench build → bench migrate. The directory
+// replacement uses a .kb-new sibling on the same filesystem so os.Rename is a
+// cheap atomic syscall, and the previous source is kept as a .kb-old sibling
+// until the upgrade succeeds.
+//
+// Recovery: if any step before `bench migrate` fails, the new directory is
+// removed, the previous source is renamed back into place, pip install -e is
+// re-run on it (best effort) and the returned error says the previous version
+// was restored. If `bench migrate` fails the swap is NOT rolled back (the
+// schema may be half-applied); .kb-old is kept and its path is included in the
+// error so an operator can recover manually.
 //
 // The caller is responsible for removing archivePath after this returns.
 func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
@@ -202,30 +209,89 @@ func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string
 		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
 	}
 
-	if err := os.RemoveAll(appDir); err != nil {
+	return swapAppDir(appDir, stagingDir, upgradeSteps{
+		SetupRequirements: func() (string, error) { return setupRequirementsPythonAndNode(ctx, appName) },
+		PipInstall:        func() (string, error) { return PipInstallEditable(ctx, appName) },
+		Build:             func() (string, error) { return BuildApp(ctx, appName) },
+		Migrate:           func() (string, error) { return runBench(ctx, "migrate") },
+	})
+}
+
+// upgradeSteps are the post-swap bench operations. They are injectable so the
+// directory swap and its rollback can be tested without a real bench.
+type upgradeSteps struct {
+	SetupRequirements func() (string, error)
+	PipInstall        func() (string, error)
+	Build             func() (string, error)
+	Migrate           func() (string, error)
+}
+
+// swapAppDir moves stagingDir into appDir (keeping the previous source as
+// appDir+".kb-old"), runs the post-swap steps, and rolls back to the previous
+// source if any step before Migrate fails. See UpdateFromArchive for the
+// recovery contract.
+func swapAppDir(appDir, stagingDir string, steps upgradeSteps) (string, error) {
+	oldDir := appDir + ".kb-old"
+	if err := os.RemoveAll(oldDir); err != nil {
 		_ = os.RemoveAll(stagingDir)
-		return "", fmt.Errorf("remove old app dir: %w", err)
+		return "", fmt.Errorf("remove stale backup %s: %w", oldDir, err)
 	}
+
+	hadOld := false
+	if _, err := os.Stat(appDir); err == nil {
+		if err := os.Rename(appDir, oldDir); err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return "", fmt.Errorf("back up old app dir: %w", err)
+		}
+		hadOld = true
+	}
+
+	// restore puts the previous source back and re-registers it (best effort).
+	restore := func(cause error, stage string) error {
+		if !hadOld {
+			return fmt.Errorf("%s: %w", stage, cause)
+		}
+		_ = os.RemoveAll(appDir)
+		if err := os.Rename(oldDir, appDir); err != nil {
+			return fmt.Errorf("%s: %w (ROLLBACK FAILED — previous version left at %s: %v)", stage, cause, oldDir, err)
+		}
+		if steps.PipInstall != nil {
+			_, _ = steps.PipInstall()
+		}
+		return fmt.Errorf("%s: %w (the previous version was restored)", stage, cause)
+	}
+
 	if err := os.Rename(stagingDir, appDir); err != nil {
-		return "", fmt.Errorf("replace app dir: %w", err)
+		_ = os.RemoveAll(stagingDir)
+		return "", restore(err, "replace app dir")
 	}
 
-	reqOut, err := setupRequirementsPythonAndNode(ctx, appName)
+	reqOut, err := steps.SetupRequirements()
 	if err != nil {
-		return reqOut, fmt.Errorf("setup requirements for %s: %w", appName, err)
+		return reqOut, restore(err, "setup requirements")
 	}
 
-	if _, pipErr := PipInstallEditable(ctx, appName); pipErr != nil {
-		return reqOut, fmt.Errorf("pip install -e for %s: %w", appName, pipErr)
+	if _, pipErr := steps.PipInstall(); pipErr != nil {
+		return reqOut, restore(pipErr, "pip install -e")
 	}
 
-	buildOut, err := BuildApp(ctx, appName)
+	buildOut, err := steps.Build()
 	if err != nil {
-		return combineBenchOutput(reqOut, buildOut), fmt.Errorf("build assets for %s: %w", appName, err)
+		return combineBenchOutput(reqOut, buildOut), restore(err, "build assets")
 	}
 
-	migrateOut, err := runBench(ctx, "migrate")
-	return combineBenchOutput(reqOut, combineBenchOutput(buildOut, migrateOut)), err
+	migrateOut, migrateErr := steps.Migrate()
+	out := combineBenchOutput(reqOut, combineBenchOutput(buildOut, migrateOut))
+	if migrateErr != nil {
+		// Do not roll back: the schema may be half-migrated.
+		if hadOld {
+			return out, fmt.Errorf("bench migrate: %w (app files were upgraded and NOT rolled back; the previous source is kept at %s)", migrateErr, oldDir)
+		}
+		return out, fmt.Errorf("bench migrate: %w", migrateErr)
+	}
+
+	_ = os.RemoveAll(oldDir)
+	return out, nil
 }
 
 // setupRequirementsPythonAndNode runs "bench setup requirements --python" then "--node".
