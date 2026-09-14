@@ -2,6 +2,7 @@ package license
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
+	"github.com/KB-Developpement/kb_pro_cli/internal/fsutil"
 )
 
 const (
@@ -24,6 +26,11 @@ type cacheEntry struct {
 	LastCheck   time.Time `json:"last_check"`
 }
 
+// ErrCacheCorrupt reports that the license cache exists but is not parseable
+// JSON. Callers may delete the cache on this error only: every other error is
+// transient (EACCES, EIO, …) and deleting would burn an activation slot.
+var ErrCacheCorrupt = errors.New("license cache is corrupt")
+
 // loadCache reads the license cache from disk.
 // Returns nil, nil if the file does not exist.
 func loadCache() (*cacheEntry, error) {
@@ -36,7 +43,7 @@ func loadCache() (*cacheEntry, error) {
 	}
 	var e cacheEntry
 	if err := json.Unmarshal(data, &e); err != nil {
-		return nil, fmt.Errorf("parse license cache: %w", err)
+		return nil, fmt.Errorf("parse license cache: %v: %w", err, ErrCacheCorrupt)
 	}
 	return &e, nil
 }
@@ -52,10 +59,10 @@ func saveCache(e *cacheEntry) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	if err := os.WriteFile(cachePath(), data, 0600); err != nil {
+	if err := fsutil.WriteFileAtomic(cachePath(), data, 0600); err != nil {
 		return fmt.Errorf("write license cache: %w", err)
 	}
-	if err := os.WriteFile(jwtPath(), []byte(e.Token+"\n"), 0600); err != nil {
+	if err := fsutil.WriteFileAtomic(jwtPath(), []byte(e.Token+"\n"), 0600); err != nil {
 		return fmt.Errorf("write license jwt: %w", err)
 	}
 	return nil

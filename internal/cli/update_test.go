@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
@@ -59,5 +62,74 @@ func TestVerifyChecksum(t *testing.T) {
 
 	if err := verifyChecksum(data, []byte(""), "kb.tar.gz"); err == nil {
 		t.Error("expected an error when checksums.txt has no entry for the asset")
+	}
+}
+
+// buildTarGz builds an in-memory tar.gz from the given headers/bodies.
+func buildTarGz(t *testing.T, entries []struct {
+	Name     string
+	Typeflag byte
+	Body     string
+},
+) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	for _, e := range entries {
+		hdr := &tar.Header{Name: e.Name, Typeflag: e.Typeflag, Mode: 0o755}
+		if e.Typeflag == tar.TypeReg {
+			hdr.Size = int64(len(e.Body))
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if e.Typeflag == tar.TypeReg {
+			if _, err := tw.Write([]byte(e.Body)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+type tgzEntry = struct {
+	Name     string
+	Typeflag byte
+	Body     string
+}
+
+func TestExtractFromTarGz_RegularFile(t *testing.T) {
+	data := buildTarGz(t, []tgzEntry{{Name: "kb", Typeflag: tar.TypeReg, Body: "BINARY"}})
+	got, err := extractFromTarGz(data, "kb")
+	if err != nil {
+		t.Fatalf("extractFromTarGz: %v", err)
+	}
+	if string(got) != "BINARY" {
+		t.Errorf("got %q, want BINARY", got)
+	}
+}
+
+func TestExtractFromTarGz_RejectsNonRegularKb(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		entries []tgzEntry
+	}{
+		{"directory named kb", []tgzEntry{{Name: "kb/", Typeflag: tar.TypeDir}}},
+		{"symlink named kb", []tgzEntry{{Name: "kb", Typeflag: tar.TypeSymlink}}},
+		{"empty regular kb", []tgzEntry{{Name: "kb", Typeflag: tar.TypeReg, Body: ""}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := extractFromTarGz(buildTarGz(t, tc.entries), "kb")
+			if err == nil {
+				t.Fatalf("expected an error, got %d bytes", len(got))
+			}
+		})
 	}
 }

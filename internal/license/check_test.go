@@ -80,3 +80,43 @@ func TestRunCheck_EmptyFingerprintClaimStaysValid(t *testing.T) {
 		t.Fatalf("CurrentState = %+v, want a valid state when the token carries no fingerprint", s)
 	}
 }
+
+// A transient read error (EACCES) must not nuke the cache: deleting it forces a
+// re-activation and burns an activation slot on the server.
+func TestRunCheck_UnreadableCacheIsNotDeleted(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file permissions")
+	}
+	withTempConfigDir(t)
+	if err := os.WriteFile(cachePath(), []byte(`{"token":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(cachePath(), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(cachePath(), 0o600) })
+	cachedState.Store(nil)
+
+	RunCheck()
+
+	if _, err := os.Stat(cachePath()); err != nil {
+		t.Fatalf("license cache must survive a transient read error: %v", err)
+	}
+	if s := CurrentState(); s != nil {
+		t.Errorf("CurrentState = %+v, want nil", s)
+	}
+}
+
+func TestRunCheck_CorruptCacheIsDeleted(t *testing.T) {
+	withTempConfigDir(t)
+	if err := os.WriteFile(cachePath(), []byte("not json at all"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cachedState.Store(nil)
+
+	RunCheck()
+
+	if _, err := os.Stat(cachePath()); !os.IsNotExist(err) {
+		t.Errorf("corrupt license cache should be deleted, stat err = %v", err)
+	}
+}

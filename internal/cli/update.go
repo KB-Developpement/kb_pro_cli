@@ -306,6 +306,9 @@ func releaseAssetName(tagVersion string) string {
 	return fmt.Sprintf("kb_%s_%s_%s.tar.gz", ver, runtime.GOOS, runtime.GOARCH)
 }
 
+// maxBinarySize caps the release binary read out of an update archive.
+const maxBinarySize = 256 << 20 // 256 MiB
+
 func extractFromTarGz(data []byte, name string) ([]byte, error) {
 	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
@@ -322,9 +325,25 @@ func extractFromTarGz(data []byte, name string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading tar: %w", err)
 		}
-		if filepath.Base(hdr.Name) == name {
-			return io.ReadAll(tr)
+		if filepath.Base(hdr.Name) != name {
+			continue
 		}
+		if hdr.Typeflag != tar.TypeReg {
+			// A directory or symlink named "kb" would otherwise yield zero
+			// bytes that get chmod 0755'd over the live binary.
+			return nil, fmt.Errorf("%q in archive is not a regular file (tar type %q)", name, string(hdr.Typeflag))
+		}
+		data, err := io.ReadAll(io.LimitReader(tr, maxBinarySize+1))
+		if err != nil {
+			return nil, fmt.Errorf("reading %q from archive: %w", name, err)
+		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("%q in archive is empty — refusing to install", name)
+		}
+		if int64(len(data)) > maxBinarySize {
+			return nil, fmt.Errorf("%q in archive exceeds %d bytes — refusing to install", name, maxBinarySize)
+		}
+		return data, nil
 	}
 	return nil, fmt.Errorf("%q not found in archive", name)
 }

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/KB-Developpement/kb_pro_cli/internal/fsutil"
 )
 
 // InstallApp runs "bench --site <site> install-app <appName>".
@@ -57,11 +59,9 @@ func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string
 		return "", fmt.Errorf("create staging dir: %w", err)
 	}
 
-	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", stagingDir, "--strip-components=1")
-	tarCmd.Dir = filepath.Dir(stagingDir)
-	if out, err := tarCmd.CombinedOutput(); err != nil {
+	if err := extractTarGzStripped(archivePath, stagingDir); err != nil {
 		_ = os.RemoveAll(stagingDir)
-		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
+		return "", fmt.Errorf("extract archive: %w", err)
 	}
 
 	if err := os.Rename(stagingDir, appDir); err != nil {
@@ -174,7 +174,7 @@ func SyncAppState(appName string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0644)
+	return fsutil.WriteFileAtomic(path, out, 0o644)
 }
 
 // UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
@@ -202,11 +202,9 @@ func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string
 		return "", fmt.Errorf("create staging dir: %w", err)
 	}
 
-	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", archivePath, "-C", stagingDir, "--strip-components=1")
-	tarCmd.Dir = filepath.Dir(stagingDir)
-	if out, err := tarCmd.CombinedOutput(); err != nil {
+	if err := extractTarGzStripped(archivePath, stagingDir); err != nil {
 		_ = os.RemoveAll(stagingDir)
-		return strings.TrimSpace(string(out)), fmt.Errorf("extract archive: %w", err)
+		return "", fmt.Errorf("extract archive: %w", err)
 	}
 
 	return swapAppDir(appDir, stagingDir, upgradeSteps{
@@ -337,7 +335,7 @@ func appendAppToAppsTxt(benchRoot, appName string) error {
 	}
 	b.WriteString(appName)
 	b.WriteByte('\n')
-	return os.WriteFile(path, []byte(b.String()), 0644)
+	return fsutil.WriteFileAtomic(path, []byte(b.String()), 0o644)
 }
 
 // removeAppFromAppsTxt removes appName from sites/apps.txt (best-effort cleanup).
@@ -359,7 +357,7 @@ func removeAppFromAppsTxt(benchRoot, appName string) {
 	if result != "" {
 		result += "\n"
 	}
-	_ = os.WriteFile(path, []byte(result), 0644)
+	_ = fsutil.WriteFileAtomic(path, []byte(result), 0o644)
 }
 
 // readAppVersion reads the version string from <app>/<app>/__version__.py,
@@ -419,12 +417,43 @@ func RestartDevServerIfRunning(ctx context.Context) (bool, error) {
 	_ = exec.CommandContext(ctx, "pkill", "-f", "honcho start").Run()
 	time.Sleep(time.Second)
 	root := benchDir()
-	cmd := exec.Command("bash", "-c",
-		fmt.Sprintf("cd %s && nohup bench start >> /home/frappe/bench-start.log 2>&1 &", root))
-	if err := cmd.Run(); err != nil {
+
+	logPath := benchStartLogPath(root)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return false, fmt.Errorf("create log dir for bench start: %w", err)
+	}
+	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return false, fmt.Errorf("open %s: %w", logPath, err)
+	}
+	defer logFile.Close()
+
+	cmd := benchStartCmd(root)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Start(); err != nil {
 		return false, fmt.Errorf("restart bench start: %w", err)
 	}
+	// Detached: we never wait on it, so release the process handle.
+	_ = cmd.Process.Release()
 	return true, nil
+}
+
+// benchStartLogPath is where a detached `bench start` writes its output.
+func benchStartLogPath(benchRoot string) string {
+	return filepath.Join(benchRoot, "logs", "bench-start.log")
+}
+
+// benchStartCmd builds the detached `bench start` command. It execs bench
+// directly — no shell — so a bench root containing spaces or shell
+// metacharacters (KB_BENCH_ROOT is attacker-influencable configuration) can
+// never be interpreted as code. Factored out so it can be asserted in tests
+// without running anything.
+func benchStartCmd(benchRoot string) *exec.Cmd {
+	cmd := exec.Command("bench", "start")
+	cmd.Dir = benchRoot
+	cmd.SysProcAttr = detachedSysProcAttr()
+	return cmd
 }
 
 // runBench executes a bench command from the bench root and returns combined output.

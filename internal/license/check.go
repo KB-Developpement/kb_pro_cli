@@ -5,6 +5,7 @@ package license
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -37,8 +38,12 @@ type State struct {
 func RunCheck() {
 	entry, err := loadCache()
 	if err != nil {
-		// Corrupted cache — delete and treat as unlicensed.
-		deleteCache()
+		// Only an unparseable cache is deleted. A transient read error (EACCES,
+		// EIO) must leave the file alone: deleting it forces a re-activation
+		// and burns an activation slot on the server.
+		if errors.Is(err, ErrCacheCorrupt) {
+			deleteCache()
+		}
 		cachedState.Store(nil)
 		return
 	}
