@@ -79,7 +79,7 @@ func ensureFirstRunSetup() {
 func requireInitializedForCLI() error {
 	ensureFirstRunSetup()
 	if !config.IsConfigured() {
-		return fmt.Errorf("configuration required — run kb init or kb (interactive menu) to set the license server URL and optional GitHub token")
+		return fmt.Errorf("configuration required — run kb init (or kb for the interactive menu) to set the license server URL, or set KB_LICENSE_SERVER for a scripted run")
 	}
 	return nil
 }

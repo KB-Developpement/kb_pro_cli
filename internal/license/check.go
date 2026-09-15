@@ -117,14 +117,28 @@ func doHeartbeat(ctx context.Context, token string) {
 		return
 	}
 
-	// Success — save the refreshed token.
-	entry := &cacheEntry{
-		Token:     result.Token,
-		LastCheck: time.Now().UTC(),
-	}
-	// Preserve ActivatedAt from existing cache.
+	// Success — save the refreshed token, but only if this binary can verify it.
+	var activatedAt time.Time
 	if existing, _ := loadCache(); existing != nil {
-		entry.ActivatedAt = existing.ActivatedAt
+		activatedAt = existing.ActivatedAt
+	}
+	acceptRefreshedToken(result.Token, activatedAt)
+}
+
+// acceptRefreshedToken stores a token the server just issued, after checking
+// that this binary can verify its signature. A token signed with a key this
+// build does not trust is discarded and the existing cache is left alone: the
+// server's signing key has been rotated ahead of this client, and overwriting
+// the cache would destroy a token that still works until it expires.
+func acceptRefreshedToken(token string, activatedAt time.Time) {
+	if _, err := verifyToken(token); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: the license server issued a token this version cannot verify — run: kb update")
+		return
+	}
+	entry := &cacheEntry{
+		Token:       token,
+		LastCheck:   time.Now().UTC(),
+		ActivatedAt: activatedAt,
 	}
 	if err := saveCache(entry); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not update license cache: %v\n", err)
@@ -165,14 +179,7 @@ func RunSyncCheck(ctx context.Context) error {
 
 	// Success — refresh cache with new token so the next background check
 	// gets a fresh 21-day window.
-	updated := &cacheEntry{
-		Token:       result.Token,
-		LastCheck:   time.Now().UTC(),
-		ActivatedAt: entry.ActivatedAt,
-	}
-	if err := saveCache(updated); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not update license cache: %v\n", err)
-	}
+	acceptRefreshedToken(result.Token, entry.ActivatedAt)
 	return nil
 }
 

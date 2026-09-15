@@ -189,3 +189,45 @@ func TestRunCheck_ForeignFingerprintWithoutKeyKeepsGenericWarning(t *testing.T) 
 		t.Errorf("expected the generic warning:\n%s", out)
 	}
 }
+
+func TestAcceptRefreshedToken_RejectsForeignKey(t *testing.T) {
+	withTempConfigDir(t)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overrideEmbeddedKey(t, pub)
+
+	fp, err := Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := signTestToken(t, priv, claims{ClientID: "acme", Fingerprint: fp}, time.Now())
+	if err := saveCache(&cacheEntry{Token: good, ActivatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A token signed by a key this build does not trust must not replace it.
+	_, foreignPriv, _ := ed25519.GenerateKey(rand.Reader)
+	foreign := signTestToken(t, foreignPriv, claims{ClientID: "acme", Fingerprint: fp}, time.Now())
+
+	stderr := captureStderr(t, func() { acceptRefreshedToken(foreign, time.Now().UTC()) })
+	if !strings.Contains(stderr, "cannot verify") {
+		t.Errorf("warning: got %q, want a cannot-verify warning", stderr)
+	}
+	kept, err := loadCache()
+	if err != nil || kept == nil {
+		t.Fatalf("cache must survive a foreign token: %v", err)
+	}
+	if kept.Token != good {
+		t.Error("cache was overwritten with an unverifiable token")
+	}
+
+	// A token this build can verify is stored.
+	next := signTestToken(t, priv, claims{ClientID: "acme", Fingerprint: fp}, time.Now().Add(time.Minute))
+	acceptRefreshedToken(next, time.Now().UTC())
+	after, _ := loadCache()
+	if after == nil || after.Token != next {
+		t.Error("a verifiable token should have been stored")
+	}
+}
