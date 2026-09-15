@@ -56,7 +56,11 @@ if command -v sha256sum > /dev/null 2>&1; then
 elif command -v shasum > /dev/null 2>&1; then
   grep "$ARCHIVE" checksums.txt | shasum -a 256 -c -
 else
-  echo "Warning: no sha256 tool found, skipping checksum verification." >&2
+  echo "Error: no sha256 tool found (sha256sum or shasum)." >&2
+  echo "Refusing to install an unverified binary. Install one, then retry:" >&2
+  echo "  Debian/Ubuntu:  sudo apt-get install -y coreutils" >&2
+  echo "  RHEL/Fedora:    sudo dnf install -y coreutils" >&2
+  exit 1
 fi
 cd - > /dev/null
 
