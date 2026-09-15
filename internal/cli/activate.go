@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/license"
@@ -67,17 +66,14 @@ func runActivate(args []string) error {
 
 	var token string
 	var activateErr error
-	if spinErr := spinner.New().
-		Title("Activating license…").
-		Action(func() {
-			fp, err := license.Fingerprint()
-			if err != nil {
-				activateErr = fmt.Errorf("compute machine fingerprint: %w", err)
-				return
-			}
-			token, activateErr = license.Activate("", licenseKey, fp)
-		}).
-		Run(); spinErr != nil {
+	if spinErr := runWithSpinner("Activating license…", func() {
+		fp, err := license.Fingerprint()
+		if err != nil {
+			activateErr = fmt.Errorf("compute machine fingerprint: %w", err)
+			return
+		}
+		token, activateErr = license.Activate("", licenseKey, fp)
+	}); spinErr != nil {
 		return spinErr
 	}
 	if activateErr != nil {

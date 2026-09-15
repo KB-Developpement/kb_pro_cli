@@ -361,13 +361,16 @@ func removeAppFromAppsTxt(benchRoot, appName string) {
 }
 
 // readAppVersion reads the version string from <app>/<app>/__version__.py,
-// falling back to app_version in <app>/<app>/hooks.py. Returns "" on failure.
+// falling back to __version__ in the package <app>/<app>/__init__.py (where
+// frappe itself and most KB apps declare it), then to app_version in
+// <app>/<app>/hooks.py. Returns "" when no candidate declares a version.
 func readAppVersion(benchRoot, appName string) string {
 	candidates := []struct {
 		file   string
 		prefix string
 	}{
 		{filepath.Join(benchRoot, "apps", appName, appName, "__version__.py"), "__version__"},
+		{filepath.Join(benchRoot, "apps", appName, appName, "__init__.py"), "__version__"},
 		{filepath.Join(benchRoot, "apps", appName, appName, "hooks.py"), "app_version"},
 	}
 	for _, c := range candidates {
@@ -391,9 +394,14 @@ func readAppVersion(benchRoot, appName string) string {
 	return ""
 }
 
+// honchoPattern matches only the honcho process itself ("…/honcho start" at
+// the end of the command line), never a shell or editor whose command line
+// merely mentions it.
+const honchoPattern = `(^|/)honcho start$`
+
 // IsDevServerRunning reports whether the bench dev server (honcho) is running.
 func IsDevServerRunning() bool {
-	return exec.Command("pgrep", "-f", "honcho start").Run() == nil
+	return exec.Command("pgrep", "-f", honchoPattern).Run() == nil
 }
 
 // IsProdWebServerRunning reports whether a production web server (gunicorn) is
@@ -409,22 +417,39 @@ func IsProdWebServerRunning() bool {
 // running. Call after app install/upgrade so the dev server picks up new Python
 // packages, DocTypes, and schema changes from the running process.
 // Returns (false, nil) when the server is not running (prod bench, manually
-// stopped) — safe to call unconditionally.
+// stopped) — safe to call unconditionally. Use StartDevServer when the server
+// was running before the operation but is gone now: there is nothing left to
+// pkill and this would report "not running" and do nothing.
 func RestartDevServerIfRunning(ctx context.Context) (bool, error) {
-	if err := exec.CommandContext(ctx, "pgrep", "-f", "honcho start").Run(); err != nil {
+	if err := exec.CommandContext(ctx, "pgrep", "-f", honchoPattern).Run(); err != nil {
 		return false, nil // not running — no-op
 	}
-	_ = exec.CommandContext(ctx, "pkill", "-f", "honcho start").Run()
+	_ = exec.CommandContext(ctx, "pkill", "-f", honchoPattern).Run()
 	time.Sleep(time.Second)
+	if err := StartDevServer(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// StartDevServer launches a detached `bench start` from the bench root with its
+// output appended to logs/bench-start.log. It does not check whether a dev
+// server is already running — callers must.
+//
+// ctx is accepted for symmetry with the other bench helpers but is deliberately
+// not attached to the process: the dev server has to outlive the kb invocation
+// that started it, so cancelling ctx (or kb exiting) must not kill it.
+func StartDevServer(ctx context.Context) error {
+	_ = ctx
 	root := benchDir()
 
 	logPath := benchStartLogPath(root)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return false, fmt.Errorf("create log dir for bench start: %w", err)
+		return fmt.Errorf("create log dir for bench start: %w", err)
 	}
 	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		return false, fmt.Errorf("open %s: %w", logPath, err)
+		return fmt.Errorf("open %s: %w", logPath, err)
 	}
 	defer logFile.Close()
 
@@ -432,11 +457,11 @@ func RestartDevServerIfRunning(ctx context.Context) (bool, error) {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
-		return false, fmt.Errorf("restart bench start: %w", err)
+		return fmt.Errorf("start bench start: %w", err)
 	}
 	// Detached: we never wait on it, so release the process handle.
 	_ = cmd.Process.Release()
-	return true, nil
+	return nil
 }
 
 // benchStartLogPath is where a detached `bench start` writes its output.

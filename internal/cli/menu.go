@@ -16,14 +16,14 @@ import (
 )
 
 const (
-	menuInstall       = "install"
-	menuAdd           = "add"
-	menuSiteInstall   = "site-install"
-	menuManage        = "manage"
-	menuUpgrade       = "upgrade"
-	menuLicense       = "license"
-	menuSettings      = "settings"
-	menuInitKBFrappe  = "init-kb-frappe"
+	menuInstall      = "install"
+	menuAdd          = "add"
+	menuSiteInstall  = "site-install"
+	menuManage       = "manage"
+	menuUpgrade      = "upgrade"
+	menuLicense      = "license"
+	menuSettings     = "settings"
+	menuInitKBFrappe = "init-kb-frappe"
 )
 
 // clearScreen writes the standard ANSI escape sequence to clear the terminal.

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
@@ -55,6 +54,9 @@ Examples:
 
 // runUpgrade updates the selected KB apps that are present in the bench.
 func runUpgrade(ctx context.Context, preselected []string) error {
+	// Sampled before anything touches apps/ — see devServerAction.
+	devWasRunning := bench.IsDevServerRunning()
+
 	if err := license.RunSyncCheck(ctx); err != nil {
 		return err
 	}
@@ -127,17 +129,14 @@ func runUpgrade(ctx context.Context, preselected []string) error {
 
 		// Each upgrade has its own 15-minute budget covering download + extract + migrate.
 		opCtx, opCancel := context.WithTimeout(ctx, 15*time.Minute)
-		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Upgrading %s…", ui.AppName.Render(name))).
-			Action(func() {
-				var tmpPath string
-				tmpPath, opErr = license.DownloadApp(opCtx, serverURL, token, name, "")
-				if opErr == nil {
-					opOut, opErr = bench.UpdateFromArchive(opCtx, tmpPath, name)
-					os.Remove(tmpPath)
-				}
-			}).
-			Run(); spinErr != nil {
+		if spinErr := runWithSpinner(fmt.Sprintf("Upgrading %s…", ui.AppName.Render(name)), func() {
+			var tmpPath string
+			tmpPath, opErr = license.DownloadApp(opCtx, serverURL, token, name, "")
+			if opErr == nil {
+				opOut, opErr = bench.UpdateFromArchive(opCtx, tmpPath, name)
+				os.Remove(tmpPath)
+			}
+		}); spinErr != nil {
 			opErr = spinErr
 		}
 		opCancel()
@@ -162,7 +161,7 @@ func runUpgrade(ctx context.Context, preselected []string) error {
 
 	if anySucceeded(results) {
 		fmt.Fprintln(os.Stdout)
-		maybeRestartDevServer(ctx)
+		maybeRestartDevServer(ctx, devWasRunning)
 	}
 	failures := printSummary(results)
 	pause()

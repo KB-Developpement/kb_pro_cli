@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/charmbracelet/huh/spinner"
-
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
 	"github.com/KB-Developpement/kb_pro_cli/internal/license"
@@ -17,6 +15,9 @@ import (
 // replaces apps/frappe in-place. The on-disk directory remains named "frappe"
 // since the tarball's top-level folder is already named "frappe".
 func runInitKBFrappe(ctx context.Context) error {
+	// Sampled before anything touches apps/frappe — see devServerAction.
+	devWasRunning := bench.IsDevServerRunning()
+
 	token, serverURL, err := licenseTokenAndServer(ctx)
 	if err != nil {
 		return err
@@ -26,12 +27,9 @@ func runInitKBFrappe(ctx context.Context) error {
 	}
 
 	var archivePath string
-	if spinErr := spinner.New().
-		Title("Downloading KB Frappe fork…").
-		Action(func() {
-			archivePath, err = license.DownloadApp(ctx, serverURL, token, "kb_frappe", "")
-		}).
-		Run(); spinErr != nil {
+	if spinErr := runWithSpinner("Downloading KB Frappe fork…", func() {
+		archivePath, err = license.DownloadApp(ctx, serverURL, token, "kb_frappe", "")
+	}); spinErr != nil {
 		return spinErr
 	}
 	if err != nil {
@@ -40,14 +38,14 @@ func runInitKBFrappe(ctx context.Context) error {
 	defer os.Remove(archivePath)
 
 	var benchOut string
-	if spinErr := spinner.New().
-		Title(fmt.Sprintf("Replacing %s with KB Frappe fork…", ui.AppName.Render("frappe"))).
-		Action(func() {
-			benchOut, err = bench.UpdateFromArchive(ctx, archivePath, "frappe")
-		}).
-		Run(); spinErr != nil {
+	if spinErr := runWithSpinner(fmt.Sprintf("Replacing %s with KB Frappe fork…", ui.AppName.Render("frappe")), func() {
+		benchOut, err = bench.UpdateFromArchive(ctx, archivePath, "frappe")
+	}); spinErr != nil {
 		return spinErr
 	}
+	// From here on apps/frappe has been swapped (or swapped and rolled back),
+	// either of which takes a running dev server down with it.
+	defer maybeRestartDevServer(ctx, devWasRunning)
 	if err != nil {
 		if globalFlags.Verbose && benchOut != "" {
 			fmt.Fprintln(os.Stdout, ui.Dim.Render(benchOut))

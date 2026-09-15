@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/go-resty/resty/v2"
 	"github.com/spf13/cobra"
 
@@ -94,21 +93,18 @@ func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 
 	var release githubRelease
 	var fetchErr error
-	_ = spinner.New().
-		Title("Checking for updates…").
-		Action(func() {
-			resp, err := githubHTTPClient.R().
-				SetResult(&release).
-				Get(githubReleasesAPI)
-			if err != nil {
-				fetchErr = fmt.Errorf("fetching release info: %w", err)
-				return
-			}
-			if resp.StatusCode() != 200 {
-				fetchErr = fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode())
-			}
-		}).
-		Run()
+	_ = runWithSpinner("Checking for updates…", func() {
+		resp, err := githubHTTPClient.R().
+			SetResult(&release).
+			Get(githubReleasesAPI)
+		if err != nil {
+			fetchErr = fmt.Errorf("fetching release info: %w", err)
+			return
+		}
+		if resp.StatusCode() != 200 {
+			fetchErr = fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode())
+		}
+	})
 	if fetchErr != nil {
 		return fetchErr
 	}
@@ -171,12 +167,9 @@ func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 	}
 
 	var installErr error
-	_ = spinner.New().
-		Title(fmt.Sprintf("Downloading kb %s…", latest)).
-		Action(func() {
-			installErr = downloadAndInstall(downloadURL, checksumsURL, target)
-		}).
-		Run()
+	_ = runWithSpinner(fmt.Sprintf("Downloading kb %s…", latest), func() {
+		installErr = downloadAndInstall(downloadURL, checksumsURL, target)
+	})
 	if installErr != nil {
 		return installErr
 	}

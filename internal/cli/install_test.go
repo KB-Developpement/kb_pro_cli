@@ -58,3 +58,31 @@ func TestSummaryError(t *testing.T) {
 		t.Fatalf("summaryError(2, 5) = %q, want %q", got, want)
 	}
 }
+
+// TestDevServerAction pins the decision table behind maybeRestartDevServer.
+// The case that matters is (runningNow=false, wasRunning=true): replacing
+// apps/<app> on disk crashes the werkzeug reloader inside `bench serve`, honcho
+// exits because a child died, and the bench is left silently down. Before the
+// fix that case did nothing at all.
+func TestDevServerAction(t *testing.T) {
+	tests := []struct {
+		name                               string
+		runningNow, wasRunning, prodRunnig bool
+		want                               string
+	}{
+		{"still running after the update", true, true, false, devActionRestart},
+		{"started by someone else mid-run", true, false, false, devActionRestart},
+		{"killed by the update", false, true, false, devActionStart},
+		{"killed by the update, prod also seen", false, true, true, devActionStart},
+		{"prod bench", false, false, true, devActionWarn},
+		{"nothing running", false, false, false, devActionNone},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := devServerAction(tc.runningNow, tc.wasRunning, tc.prodRunnig); got != tc.want {
+				t.Fatalf("devServerAction(%v, %v, %v) = %q, want %q",
+					tc.runningNow, tc.wasRunning, tc.prodRunnig, got, tc.want)
+			}
+		})
+	}
+}

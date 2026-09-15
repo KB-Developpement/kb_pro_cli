@@ -81,14 +81,21 @@ KB — What would you like to do?
 
 ### Init KB Frappe
 
-Shown **only** when `apps/frappe` is the stock `frappe/frappe` repo (detected via the git remote). If your license does not include `kb_frappe`, an error is shown and the menu exits — contact KB to update your license.
+Available as the **Init KB Frappe** menu entry — shown **only** when `apps/frappe` is the stock `frappe/frappe` repo (detected via the git remote) — and as the `kb init-kb-frappe` subcommand, which needs no TTY and so works in scripts, CI, and `ffm shell --exec`. If your license does not include `kb_frappe`, an error is shown and the menu exits — contact KB to update your license.
 
-When selected, `kb`:
+```bash
+kb init-kb-frappe                      # Refuses to run unless apps/frappe is stock frappe/frappe
+kb init-kb-frappe --force              # Replace apps/frappe anyway (unrecognised or missing git remote)
+kb init-kb-frappe --force --no-input   # Scripted / CI usage
+```
+
+Without `--force` the subcommand stops when the git remote cannot be read (it tells you to pass `--force`), and exits successfully with a note when `apps/frappe` is already the KB fork. Both paths then do the same thing:
 
 1. Downloads the private `kb_frappe` tarball from the license server (`GET /download/kb_frappe`)
 2. Atomically replaces `apps/frappe` in-place — the directory remains named `frappe`
 3. Runs `bench setup requirements --python/--node frappe`, `pip install -e apps/frappe`, `bench build --app frappe`, and `bench migrate`
 4. Updates `sites/apps.json` with the new version
+5. Restarts the dev server, or starts it again if replacing `apps/frappe` took it down (see [Install apps](#install-apps))
 
 After this completes the full 7-option menu is available on the next iteration. `kb_frappe` is a private fork of `frappe/frappe`; its Python package name and on-disk directory remain `frappe` — nothing in any installed app needs to change.
 
@@ -99,6 +106,8 @@ After this completes the full 7-option menu is available on the next iteration. 
 Combines **Add apps to bench** and **Site-install apps** in one step. For each selected app, downloads the tarball, performs the full bench-side setup, then runs `bench install-app` on the active site. Apps already installed on the site or already present in the bench are excluded from the picker.
 
 You need **`kb activate`** first so a JWT is available. If downloads fail with HTTP 402/403 or upstream errors, ensure the license server has a **GitHub PAT** configured (`github_pat` / `kbls config`) and that the app is in your JWT **`allowed_apps`** list.
+
+**Dev server.** Whether the dev server (`bench start` / honcho) is running is sampled **before** the first download, because writing into `apps/` crashes the werkzeug reloader inside `bench serve` and honcho then exits as soon as that child dies. If the server is still up at the end it is restarted; if it was up at the start but is gone by the end, **`kb`** starts it again and prints *"Dev server was stopped by the update — started again."*; on a prod bench (gunicorn, no honcho) you get the usual reminder to restart the bench services yourself. The same applies to **`kb add`**, **`kb site-install`**, **`kb upgrade`**, and **`kb init-kb-frappe`**.
 
 ### Add apps to bench
 
@@ -157,6 +166,8 @@ kb upgrade --no-input --apps kb_pro # Scripted / CI usage
 ```
 
 Per-app timeout is **15 minutes** (download + extract + build + migrate). Use **`--verbose`** for more bench output.
+
+Replacing an app directory takes a running dev server down with it, so **`kb upgrade`** records whether one was running before the first download and — once at least one app has upgraded — restarts it, or starts it again if the upgrade killed it. See [Install apps](#install-apps) for the full rule.
 
 ### License
 
@@ -222,7 +233,7 @@ Names and default **tier** metadata (authoritative allowed list is always the **
 
 | App | Repository | Default tier | Notes |
 |-----|------------|--------------|-------|
-| `kb_frappe` | KB-Developpement/kb_frappe | standard | Replaces stock `frappe` via **Init KB Frappe** — not selectable in normal install/upgrade pickers |
+| `kb_frappe` | KB-Developpement/kb_frappe | standard | Replaces stock `frappe` via **Init KB Frappe** / `kb init-kb-frappe` — not selectable in normal install/upgrade pickers |
 | `kb_pro` | KB-Developpement/kb_pro | standard | |
 | `kb_compta` | KB-Developpement/kb_compta | standard | |
 | `kb_cheque` | KB-Developpement/kb_cheque | standard | |
@@ -245,6 +256,7 @@ kb config                  Edit ~/.config/kb/config.json interactively (TTY; no 
 kb add                     Download apps into bench: extract, pip install -e, build assets (--apps, optional --version when one app)
 kb site-install            Install already-downloaded apps on this site via bench install-app (--apps)
 kb install  (alias: i)     Download and install apps on this site — combines kb add + kb site-install (--apps, optional --version when one app)
+kb init-kb-frappe          Replace stock apps/frappe with the licensed KB Frappe fork (--force)
 kb manage   (alias: m)     Interactive manage submenu (uninstall from site / remove from bench)
 kb upgrade  (alias: up)    Download latest release, rebuild assets, and migrate KB apps already in bench (--apps)
 kb activate (alias: a)     Activate this machine with a KB Pro license key
@@ -270,7 +282,7 @@ License **deactivate** (remove local JWT + key files) is available from the main
 
 **`kb init`** and **`kb config`** require a TTY and cannot be used with **`--no-input`**.
 
-**`kb install`**, **`kb add`**, **`kb site-install`**, **`kb manage`**, and **`kb upgrade`** require **`~/.config/kb/config.json`** to exist when you use **`--no-input`** (the file marks "setup complete"). Create it once on the image or runner (for example by copying from a template machine). A minimal file needs at least **`license_server_url`** (or set **`KB_LICENSE_SERVER`**); `github_token` can be omitted.
+**`kb install`**, **`kb add`**, **`kb site-install`**, **`kb manage`**, **`kb upgrade`**, and **`kb init-kb-frappe`** require **`~/.config/kb/config.json`** to exist when you use **`--no-input`** (the file marks "setup complete"). Create it once on the image or runner (for example by copying from a template machine). A minimal file needs at least **`license_server_url`** (or set **`KB_LICENSE_SERVER`**); `github_token` can be omitted.
 
 Example `config.json` with stored credentials (typical for CI):
 
@@ -288,6 +300,7 @@ kb install      --no-input --apps kb_pro --version v1.4.0
 kb add          --no-input --apps kb_cheque
 kb site-install --no-input --apps kb_cheque
 kb upgrade      --no-input --apps kb_pro,kb_compta
+kb init-kb-frappe --force --no-input
 kb activate <license-key>          # key as argument, no prompt
 kb update  --no-input --yes        # or just --no-input (implies --yes)
 ```

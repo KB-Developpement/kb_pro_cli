@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
@@ -151,6 +150,9 @@ Examples:
 // runAdd downloads selected apps into the bench and performs all post-download
 // steps: pip install -e (inside GetAppFromArchive), bench build, apps.json sync.
 func runAdd(ctx context.Context, preselected []string, versionFromFlag string) error {
+	// Sampled before anything touches apps/ — see devServerAction.
+	devWasRunning := bench.IsDevServerRunning()
+
 	token, serverURL, err := licenseTokenAndServer(ctx)
 	if err != nil {
 		return err
@@ -202,6 +204,10 @@ func runAdd(ctx context.Context, preselected []string, versionFromFlag string) e
 	dlResults := downloadApps(ctx, selected, downloadRef, serverURL, token)
 
 	results := postDownloadSteps(ctx, dlResults, true)
+	if anySucceeded(results) {
+		fmt.Fprintln(os.Stdout)
+		maybeRestartDevServer(ctx, devWasRunning)
+	}
 	failures := printSummary(results)
 	pause()
 	return summaryError(failures, len(results))
@@ -209,6 +215,9 @@ func runAdd(ctx context.Context, preselected []string, versionFromFlag string) e
 
 // runSiteInstall installs already-downloaded apps onto the given site.
 func runSiteInstall(ctx context.Context, site string, preselected []string) error {
+	// Sampled before anything touches apps/ — see devServerAction.
+	devWasRunning := bench.IsDevServerRunning()
+
 	allowedSet := license.AllowedSet()
 	if allowedSet == nil {
 		return fmt.Errorf("license required to install apps — run: kb activate")
@@ -240,7 +249,7 @@ func runSiteInstall(ctx context.Context, site string, preselected []string) erro
 	results := siteInstallApps(ctx, site, selected)
 	if anySucceeded(results) {
 		fmt.Fprintln(os.Stdout)
-		maybeRestartDevServer(ctx)
+		maybeRestartDevServer(ctx, devWasRunning)
 	}
 	failures := printSummary(results)
 	pause()
@@ -249,6 +258,9 @@ func runSiteInstall(ctx context.Context, site string, preselected []string) erro
 
 // runInstall downloads selected apps and installs them on the site in one step.
 func runInstall(ctx context.Context, site string, preselected []string, versionFromFlag string) error {
+	// Sampled before anything touches apps/ — see devServerAction.
+	devWasRunning := bench.IsDevServerRunning()
+
 	token, serverURL, err := licenseTokenAndServer(ctx)
 	if err != nil {
 		return err
@@ -324,10 +336,10 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 		opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
 		var installOut string
 		var installErr error
-		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(r.name), site)).
-			Action(func() { installOut, installErr = bench.InstallApp(opCtx, site, r.name) }).
-			Run(); spinErr != nil {
+		if spinErr := runWithSpinner(
+			fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(r.name), site),
+			func() { installOut, installErr = bench.InstallApp(opCtx, site, r.name) },
+		); spinErr != nil {
 			installErr = spinErr
 		}
 		opCancel()
@@ -345,7 +357,7 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 
 	if anySucceeded(installResults) {
 		fmt.Fprintln(os.Stdout)
-		maybeRestartDevServer(ctx)
+		maybeRestartDevServer(ctx, devWasRunning)
 	}
 	failures := printSummary(installResults)
 	pause()
@@ -420,10 +432,10 @@ func postDownloadSteps(ctx context.Context, dlResults []dlResult, printSuccess b
 		opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
 		var buildOut string
 		var buildErr error
-		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Building assets for %s…", ui.AppName.Render(dr.name))).
-			Action(func() { buildOut, buildErr = bench.BuildApp(opCtx, dr.name) }).
-			Run(); spinErr != nil {
+		if spinErr := runWithSpinner(
+			fmt.Sprintf("Building assets for %s…", ui.AppName.Render(dr.name)),
+			func() { buildOut, buildErr = bench.BuildApp(opCtx, dr.name) },
+		); spinErr != nil {
 			buildErr = spinErr
 		}
 		opCancel()
@@ -457,10 +469,10 @@ func siteInstallApps(ctx context.Context, site string, names []string) []install
 		opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
 		var opOut string
 		var opErr error
-		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(name), site)).
-			Action(func() { opOut, opErr = bench.InstallApp(opCtx, site, name) }).
-			Run(); spinErr != nil {
+		if spinErr := runWithSpinner(
+			fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(name), site),
+			func() { opOut, opErr = bench.InstallApp(opCtx, site, name) },
+		); spinErr != nil {
 			opErr = spinErr
 		}
 		opCancel()
@@ -607,19 +619,80 @@ func anySucceeded(results []installResult) bool {
 	return false
 }
 
-// maybeRestartDevServer restarts honcho if running (dev bench), or prints a
-// warning if prod web processes are running. Silent when nothing is running.
-func maybeRestartDevServer(ctx context.Context) {
-	if bench.IsDevServerRunning() {
+// Outcomes of devServerAction.
+const (
+	devActionRestart = "restart" // dev server alive now — bounce it
+	devActionStart   = "start"   // dev server died during the operation — bring it back
+	devActionWarn    = "warn"    // prod bench — tell the operator to restart services
+	devActionNone    = "none"    // nothing was running before or after
+)
+
+// devServerAction decides what to do with the web server after an operation
+// that rewrote apps/ on disk. It is pure so the decision table can be tested
+// without any process on the machine.
+//
+// wasRunning is sampled before the operation starts. Replacing apps/<app>
+// crashes the werkzeug reloader inside `bench serve`, and honcho exits as soon
+// as one of its children dies — so a bench that was running dev mode can be
+// gone by the time we look. Restarting is impossible then (there is no process
+// to pkill); it has to be started.
+func devServerAction(runningNow, wasRunning, prodRunning bool) string {
+	switch {
+	case runningNow:
+		return devActionRestart
+	case wasRunning:
+		return devActionStart
+	case prodRunning:
+		return devActionWarn
+	default:
+		return devActionNone
+	}
+}
+
+// maybeRestartDevServer brings the web server back in line with the files on
+// disk. devWasRunning must be the value bench.IsDevServerRunning() returned
+// before the operation began. Silent when nothing was running either side.
+func maybeRestartDevServer(ctx context.Context, devWasRunning bool) {
+	runningNow := bench.IsDevServerRunning()
+	prodRunning := false
+	if !runningNow {
+		prodRunning = bench.IsProdWebServerRunning()
+	}
+
+	switch devServerAction(runningNow, devWasRunning, prodRunning) {
+	case devActionRestart:
 		var restarted bool
-		_ = spinner.New().
-			Title("Restarting dev server…").
-			Action(func() { restarted, _ = bench.RestartDevServerIfRunning(ctx) }).
-			Run()
-		if restarted {
+		var restartErr error
+		_ = runWithSpinner("Restarting dev server…", func() {
+			restarted, restartErr = bench.RestartDevServerIfRunning(ctx)
+		})
+		switch {
+		case restartErr != nil:
+			errlog.Logf("restart dev server: %v", restartErr)
+			fmt.Fprintf(os.Stdout, "%s Could not restart the dev server: %v\n", ui.Warn.Render("!"), restartErr)
+		case restarted:
 			fmt.Fprintln(os.Stdout, ui.Success.Render("✓")+" Dev server restarted.")
+		case devWasRunning:
+			// Died between our sample and the restart's own check: start it.
+			if err := bench.StartDevServer(ctx); err != nil {
+				errlog.Logf("start dev server: %v", err)
+				fmt.Fprintf(os.Stdout, "%s The update stopped the dev server and it could not be started again: %v\n", ui.Warn.Render("!"), err)
+			} else {
+				fmt.Fprintln(os.Stdout, ui.Success.Render("✓")+" Dev server was stopped by the update — started again.")
+			}
 		}
-	} else if bench.IsProdWebServerRunning() {
+	case devActionStart:
+		var startErr error
+		_ = runWithSpinner("Starting dev server…", func() {
+			startErr = bench.StartDevServer(ctx)
+		})
+		if startErr != nil {
+			errlog.Logf("start dev server: %v", startErr)
+			fmt.Fprintf(os.Stdout, "%s The update stopped the dev server and it could not be started again: %v\n", ui.Warn.Render("!"), startErr)
+		} else {
+			fmt.Fprintln(os.Stdout, ui.Success.Render("✓")+" Dev server was stopped by the update — started again.")
+		}
+	case devActionWarn:
 		fmt.Fprintln(os.Stdout, ui.Warn.Render("!")+" Restart the bench services to apply changes.")
 	}
 }

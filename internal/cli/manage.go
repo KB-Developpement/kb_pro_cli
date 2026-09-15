@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
@@ -138,10 +137,10 @@ func runManageUninstall(ctx context.Context, site string, installed map[string]b
 		var opOut string
 		var opErr error
 		opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
-		if spinErr := spinner.New().
-			Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
-			Action(func() { opOut, opErr = bench.UninstallApp(opCtx, site, name, force) }).
-			Run(); spinErr != nil {
+		if spinErr := runWithSpinner(
+			fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site),
+			func() { opOut, opErr = bench.UninstallApp(opCtx, site, name, force) },
+		); spinErr != nil {
 			opErr = spinErr
 		}
 		opCancel()
@@ -222,10 +221,10 @@ func runManageRemove(ctx context.Context, site string, installed, inBench map[st
 		if installed[name] {
 			var opOut string
 			opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
-			if spinErr := spinner.New().
-				Title(fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site)).
-				Action(func() { opOut, opErr = bench.UninstallApp(opCtx, site, name, force) }).
-				Run(); spinErr != nil {
+			if spinErr := runWithSpinner(
+				fmt.Sprintf("Uninstalling %s from %s…", ui.AppName.Render(name), site),
+				func() { opOut, opErr = bench.UninstallApp(opCtx, site, name, force) },
+			); spinErr != nil {
 				opErr = spinErr
 			}
 			opCancel()
@@ -236,10 +235,10 @@ func runManageRemove(ctx context.Context, site string, installed, inBench map[st
 		if opErr == nil {
 			var opOut string
 			opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
-			if spinErr := spinner.New().
-				Title(fmt.Sprintf("Removing %s from bench…", ui.AppName.Render(name))).
-				Action(func() { opOut, opErr = bench.RemoveApp(opCtx, name) }).
-				Run(); spinErr != nil {
+			if spinErr := runWithSpinner(
+				fmt.Sprintf("Removing %s from bench…", ui.AppName.Render(name)),
+				func() { opOut, opErr = bench.RemoveApp(opCtx, name) },
+			); spinErr != nil {
 				opErr = spinErr
 			}
 			opCancel()
