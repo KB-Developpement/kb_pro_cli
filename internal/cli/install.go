@@ -26,6 +26,7 @@ import (
 // Equivalent to "bench get-app".
 func newAddCmd() *cobra.Command {
 	var appsFlag, versionFlag string
+	var skipFrappeCheck bool
 
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -49,12 +50,16 @@ Examples:
 			if !bench.InBenchContainer() {
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}
+			if err := requireKBFrappe(skipFrappeCheck); err != nil {
+				return err
+			}
 			return runAdd(cmd.Context(), parseAppsFlag(appsFlag), versionFlag)
 		},
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
 	cmd.Flags().StringVar(&versionFlag, "version", "", "Git tag, branch, or commit — one app only (default: latest release)")
+	cmd.Flags().BoolVar(&skipFrappeCheck, "skip-frappe-check", false, "Run even if apps/frappe is still stock Frappe")
 	return cmd
 }
 
@@ -62,6 +67,7 @@ Examples:
 // KB apps on the active Frappe site. Equivalent to "bench install-app".
 func newSiteInstallCmd() *cobra.Command {
 	var appsFlag string
+	var skipFrappeCheck bool
 
 	cmd := &cobra.Command{
 		Use:   "site-install",
@@ -85,6 +91,9 @@ Examples:
 			if !bench.InBenchContainer() {
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}
+			if err := requireKBFrappe(skipFrappeCheck); err != nil {
+				return err
+			}
 			site, err := bench.DetectSiteName()
 			if err != nil {
 				return fmt.Errorf("could not detect site name: %w\nSet the active site with: bench use <site>", err)
@@ -97,6 +106,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
+	cmd.Flags().BoolVar(&skipFrappeCheck, "skip-frappe-check", false, "Run even if apps/frappe is still stock Frappe")
 	return cmd
 }
 
@@ -105,6 +115,7 @@ Examples:
 // "bench get-app <url> && bench install-app <app>".
 func newInstallCmd() *cobra.Command {
 	var appsFlag, versionFlag string
+	var skipFrappeCheck bool
 
 	cmd := &cobra.Command{
 		Use:     "install",
@@ -129,6 +140,9 @@ Examples:
 			if !bench.InBenchContainer() {
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}
+			if err := requireKBFrappe(skipFrappeCheck); err != nil {
+				return err
+			}
 			site, err := bench.DetectSiteName()
 			if err != nil {
 				return fmt.Errorf("could not detect site name: %w\nSet the active site with: bench use <site>", err)
@@ -142,6 +156,7 @@ Examples:
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
 	cmd.Flags().StringVar(&versionFlag, "version", "", "Git tag, branch, or commit — one app only (default: latest release)")
+	cmd.Flags().BoolVar(&skipFrappeCheck, "skip-frappe-check", false, "Run even if apps/frappe is still stock Frappe")
 	return cmd
 }
 
@@ -256,7 +271,71 @@ func runSiteInstall(ctx context.Context, site string, preselected []string) erro
 	return summaryError(failures, len(results))
 }
 
-// runInstall downloads selected apps and installs them on the site in one step.
+// appPlan is what a "kb install" run has to do: apps that must still be
+// downloaded into the bench, and apps that are already there and only need
+// "bench install-app" on the site.
+type appPlan struct {
+	Download        []string
+	SiteInstallOnly []string
+}
+
+// planInstall decides what "kb install" does with each explicitly named app.
+//
+// "kb install" means "download if needed, then install on this site": an app
+// already downloaded into the bench but not installed on the site skips the
+// download/build phase instead of being refused. Every other rejection is
+// reported with its precise reason. A nil preselected means the caller has not
+// chosen anything yet (interactive picker) and plans nothing.
+//
+// It is pure so the whole decision table can be tested without a bench.
+func planInstall(all []apps.App, allowed map[string]bool, inBench, installed map[string]bool, preselected []string) (appPlan, error) {
+	if preselected == nil {
+		return appPlan{}, nil
+	}
+	byName := indexByName(all)
+
+	var plan appPlan
+	for _, name := range preselected {
+		_, known := byName[name]
+		switch {
+		case !known:
+			return appPlan{}, fmt.Errorf("app %q is not a KB app", name)
+		case !allowed[name]:
+			return appPlan{}, fmt.Errorf("app %q is not in your license", name)
+		case installed[name]:
+			return appPlan{}, fmt.Errorf("app %q is already installed on this site — use: kb upgrade to update it", name)
+		case inBench[name]:
+			plan.SiteInstallOnly = append(plan.SiteInstallOnly, name)
+		default:
+			plan.Download = append(plan.Download, name)
+		}
+	}
+	return plan, nil
+}
+
+// installSelectable returns the apps "kb install" can act on: licensed and not
+// yet installed on this site. Apps already downloaded into the bench stay in
+// the list — install completes them with bench install-app.
+func installSelectable(all []apps.App, allowed map[string]bool, installed map[string]bool) []apps.App {
+	var selectable []apps.App
+	for _, app := range all {
+		if allowed[app.Name] && !installed[app.Name] {
+			selectable = append(selectable, app)
+		}
+	}
+	return selectable
+}
+
+// installOptionLabel renders a picker row for "kb install", flagging apps that
+// are already in the bench so the extra work is visibly skipped.
+func installOptionLabel(name string, inBench bool) string {
+	if inBench {
+		return name + "  (already downloaded — will install on site)"
+	}
+	return name
+}
+
+// runInstall downloads selected apps when needed and installs them on the site.
 func runInstall(ctx context.Context, site string, preselected []string, versionFromFlag string) error {
 	// Sampled before anything touches apps/ — see devServerAction.
 	devWasRunning := bench.IsDevServerRunning()
@@ -271,61 +350,68 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Warning: could not detect installed apps — all apps will be shown"))
 	}
 	inBench := bench.DetectAppsInBench()
-
 	allowedSet := license.AllowedSet()
-	var alreadyInstalled, alreadyDownloaded, notLicensed []string
-	var selectable []apps.App
-	for _, app := range apps.All {
-		switch {
-		case !allowedSet[app.Name]:
-			notLicensed = append(notLicensed, app.Name)
-		case installed[app.Name]:
-			alreadyInstalled = append(alreadyInstalled, app.Name)
-		case inBench[app.Name]:
-			alreadyDownloaded = append(alreadyDownloaded, app.Name)
-		default:
-			selectable = append(selectable, app)
-		}
-	}
 
 	if !globalFlags.Quiet {
+		var alreadyInstalled, notLicensed []string
+		for _, app := range apps.All {
+			switch {
+			case !allowedSet[app.Name]:
+				notLicensed = append(notLicensed, app.Name)
+			case installed[app.Name]:
+				alreadyInstalled = append(alreadyInstalled, app.Name)
+			}
+		}
 		if len(notLicensed) > 0 {
 			fmt.Fprintln(os.Stderr, ui.Dim.Render("Not in your license: "+strings.Join(notLicensed, ", ")))
 		}
 		if len(alreadyInstalled) > 0 {
 			fmt.Fprintln(os.Stderr, ui.Dim.Render("Already installed: "+strings.Join(alreadyInstalled, ", ")))
 		}
-		if len(alreadyDownloaded) > 0 {
-			fmt.Fprintln(os.Stderr, ui.Dim.Render("Already downloaded (use kb site-install): "+strings.Join(alreadyDownloaded, ", ")))
-		}
-	}
-	if len(selectable) == 0 {
-		fmt.Fprintln(os.Stdout, ui.Success.Render("All KB apps are already installed or downloaded."))
-		return nil
 	}
 
-	selected, err := selectAppsInteractiveOrFlag(selectable, preselected, "Select KB apps to install")
-	if err != nil || len(selected) == 0 {
-		return err
-	}
-
-	downloadRef, err := resolveDownloadRef(selected, versionFromFlag, preselected == nil)
-	if err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
+	selected := preselected
+	if selected == nil {
+		selectable := installSelectable(apps.All, allowedSet, installed)
+		if len(selectable) == 0 {
+			fmt.Fprintln(os.Stdout, ui.Success.Render("All KB apps are already installed on this site."))
 			return nil
 		}
+		selected, err = selectAppsInteractive(selectable, "Select KB apps to install", func(a apps.App) string {
+			return installOptionLabel(a.Name, inBench[a.Name])
+		})
+		if err != nil || len(selected) == 0 {
+			return err
+		}
+	}
+
+	plan, err := planInstall(apps.All, allowedSet, inBench, installed, selected)
+	if err != nil {
 		return err
 	}
 
-	fmt.Fprintln(os.Stdout)
+	// Phases 1 and 2 only concern apps that are not in the bench yet.
+	var addResults []installResult
+	if len(plan.Download) > 0 {
+		downloadRef, refErr := resolveDownloadRef(plan.Download, versionFromFlag, preselected == nil)
+		if refErr != nil {
+			if errors.Is(refErr, huh.ErrUserAborted) {
+				return nil
+			}
+			return refErr
+		}
 
-	// Phase 1: parallel download + extraction + pip install.
-	dlResults := downloadApps(ctx, selected, downloadRef, serverURL, token)
+		fmt.Fprintln(os.Stdout)
 
-	// Phase 2: sequential bench build + apps.json sync.
-	addResults := postDownloadSteps(ctx, dlResults, false)
+		// Phase 1: parallel download + extraction + pip install.
+		dlResults := downloadApps(ctx, plan.Download, downloadRef, serverURL, token)
 
-	// Phase 3: sequential bench install-app for apps that passed phase 2.
+		// Phase 2: sequential bench build + apps.json sync.
+		addResults = postDownloadSteps(ctx, dlResults, false)
+	}
+
+	// Phase 3: sequential bench install-app — for apps that passed phase 2 and
+	// for apps that were already downloaded into the bench.
 	fmt.Fprintln(os.Stdout)
 	var installResults []installResult
 	for _, r := range addResults {
@@ -333,27 +419,9 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 			installResults = append(installResults, r)
 			continue
 		}
-		opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
-		var installOut string
-		var installErr error
-		if spinErr := runWithSpinner(
-			fmt.Sprintf("Installing %s on %s…", ui.AppName.Render(r.name), site),
-			func() { installOut, installErr = bench.InstallApp(opCtx, site, r.name) },
-		); spinErr != nil {
-			installErr = spinErr
-		}
-		opCancel()
-		if installErr != nil {
-			errlog.Logf("install-app %s on %s: %v", r.name, site, installErr)
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(r.name), installErr)
-		} else {
-			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(r.name))
-			if globalFlags.Verbose && installOut != "" {
-				fmt.Fprintln(os.Stdout, ui.Dim.Render(installOut))
-			}
-		}
-		installResults = append(installResults, installResult{r.name, installErr})
+		installResults = append(installResults, siteInstallApps(ctx, site, []string{r.name})...)
 	}
+	installResults = append(installResults, siteInstallApps(ctx, site, plan.SiteInstallOnly)...)
 
 	if anySucceeded(installResults) {
 		fmt.Fprintln(os.Stdout)
@@ -523,10 +591,17 @@ func selectAppsInteractiveOrFlag(selectable []apps.App, preselected []string, ti
 		}
 		return preselected, nil
 	}
+	return selectAppsInteractive(selectable, title, nil)
+}
+
+// selectAppsInteractive shows the multi-select form, refusing up front when
+// prompts are disabled. label renders each row (nil = the bare app name).
+// Returns (nil, nil) when the user cancels the form (Esc / Ctrl+C).
+func selectAppsInteractive(selectable []apps.App, title string, label func(apps.App) string) ([]string, error) {
 	if globalFlags.NoInput {
 		return nil, fmt.Errorf("specify apps with --apps when using --no-input")
 	}
-	selected, err := selectApps(selectable, title)
+	selected, err := selectAppsLabeled(selectable, title, label)
 	if errors.Is(err, huh.ErrUserAborted) {
 		return nil, nil // Esc / Ctrl+C — treat as no selection, not an error
 	}
@@ -585,9 +660,19 @@ func promptOptionalDownloadRef(appName, defaultRef string) (string, error) {
 
 // selectApps shows a multi-select form and returns the chosen app names.
 func selectApps(selectable []apps.App, title string) ([]string, error) {
+	return selectAppsLabeled(selectable, title, nil)
+}
+
+// selectAppsLabeled is selectApps with a custom row renderer; label nil renders
+// the bare app name. The value behind every row is always the app name.
+func selectAppsLabeled(selectable []apps.App, title string, label func(apps.App) string) ([]string, error) {
 	options := make([]huh.Option[string], len(selectable))
 	for i, app := range selectable {
-		options[i] = huh.NewOption(app.Name, app.Name)
+		text := app.Name
+		if label != nil {
+			text = label(app)
+		}
+		options[i] = huh.NewOption(text, app.Name)
 	}
 
 	var selected []string

@@ -19,6 +19,7 @@ import (
 
 func newUpgradeCmd() *cobra.Command {
 	var appsFlag string
+	var skipFrappeCheck bool
 
 	cmd := &cobra.Command{
 		Use:     "upgrade",
@@ -43,12 +44,16 @@ Examples:
 			if !bench.InBenchContainer() {
 				return fmt.Errorf("kb must be run inside a Frappe bench container — use: ffm shell <bench-name>")
 			}
+			if err := requireKBFrappe(skipFrappeCheck); err != nil {
+				return err
+			}
 			preselected := parseAppsFlag(appsFlag)
 			return runUpgrade(cmd.Context(), preselected)
 		},
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
+	cmd.Flags().BoolVar(&skipFrappeCheck, "skip-frappe-check", false, "Run even if apps/frappe is still stock Frappe")
 	return cmd
 }
 

@@ -103,7 +103,9 @@ After this completes the full 7-option menu is available on the next iteration. 
 
 ### Install apps
 
-Combines **Add apps to bench** and **Site-install apps** in one step. For each selected app, downloads the tarball, performs the full bench-side setup, then runs `bench install-app` on the active site. Apps already installed on the site or already present in the bench are excluded from the picker.
+Combines **Add apps to bench** and **Site-install apps** in one step. For each selected app, downloads the tarball, performs the full bench-side setup, then runs `bench install-app` on the active site. Apps already installed on the site are excluded from the picker; an app **already present in the bench** but not yet on the site stays in the list (marked *already downloaded — will install on site*) and skips straight to `bench install-app`, so **`kb install --apps <app>`** completes it instead of refusing it. Naming an app that is unknown, missing from your license, or already installed on the site still fails, now with a message saying which of the three it is.
+
+**Stock Frappe guard.** Refuses to run when `apps/frappe` is still the stock `frappe/frappe` repo — KB apps need the KB Frappe fork — and tells you to run **`kb init-kb-frappe`** first. The check happens before any download or bench change, and only a positive stock match blocks: an unreadable or unrecognised git remote does not. Pass **`--skip-frappe-check`** to run anyway.
 
 You need **`kb activate`** first so a JWT is available. If downloads fail with HTTP 402/403 or upstream errors, ensure the license server has a **GitHub PAT** configured (`github_pat` / `kbls config`) and that the app is in your JWT **`allowed_apps`** list.
 
@@ -123,6 +125,8 @@ Downloads app archives from the license server and performs the **full bench get
 
 Downloads run **in parallel** (up to 3 at a time); steps 2–7 run sequentially per app after the parallel phase. When you pick **exactly one** app, **`kb`** asks for an optional **version or tag** (`?v=` on the license server: tag, branch, or commit). Multiple apps always use **latest**. From the shell: **`kb add --apps <one_app> --version <ref>`** (**`--version`** is ignored when more than one app is selected). Apps already present in the bench are excluded from the picker. Use **`kb site-install`** to install downloaded apps on a site.
 
+Like **`kb install`**, **`kb add`** refuses to run while `apps/frappe` is still stock `frappe/frappe` and points you at **`kb init-kb-frappe`**; **`--skip-frappe-check`** overrides that.
+
 ### Site-install apps
 
 Installs already-downloaded apps onto the active Frappe site. Equivalent to running **`bench install-app`** directly. Performs all Frappe site-level setup: DocType sync, fixture imports, module definitions, hook execution (before/after install, after sync), scheduled job registration, portal settings sync, customisation sync, dashboards sync, and patch log creation. Apps not yet present in the bench are excluded — use **`kb add`** first.
@@ -132,6 +136,8 @@ kb site-install                        # Interactive — pick from downloaded ap
 kb site-install --apps kb_app          # Non-interactive
 kb site-install --no-input --apps kb_app  # CI usage
 ```
+
+It also refuses to run while `apps/frappe` is still stock `frappe/frappe` — run **`kb init-kb-frappe`** first, or pass **`--skip-frappe-check`**.
 
 ### Manage apps
 
@@ -164,6 +170,8 @@ kb upgrade                          # Interactive — pick from apps currently i
 kb upgrade --apps kb_pro,kb_compta  # Non-interactive upgrade
 kb upgrade --no-input --apps kb_pro # Scripted / CI usage
 ```
+
+**`kb upgrade`** refuses to run while `apps/frappe` is still stock `frappe/frappe` (run **`kb init-kb-frappe`** first, or pass **`--skip-frappe-check`**) — the same guard as **`kb install`**, **`kb add`**, and **`kb site-install`**.
 
 Per-app timeout is **15 minutes** (download + extract + build + migrate). Use **`--verbose`** for more bench output.
 
@@ -253,12 +261,12 @@ All subcommands accept the global flags listed below unless noted.
 kb                         Interactive main menu (init wizard if ~/.config/kb/config.json is missing)
 kb init                    First-time setup wizard — same fields as Settings (TTY; no --no-input)
 kb config                  Edit ~/.config/kb/config.json interactively (TTY; no --no-input)
-kb add                     Download apps into bench: extract, pip install -e, build assets (--apps, optional --version when one app)
-kb site-install            Install already-downloaded apps on this site via bench install-app (--apps)
-kb install  (alias: i)     Download and install apps on this site — combines kb add + kb site-install (--apps, optional --version when one app)
+kb add                     Download apps into bench: extract, pip install -e, build assets (--apps, optional --version when one app, --skip-frappe-check)
+kb site-install            Install already-downloaded apps on this site via bench install-app (--apps, --skip-frappe-check)
+kb install  (alias: i)     Download and install apps on this site — combines kb add + kb site-install (--apps, optional --version when one app, --skip-frappe-check)
 kb init-kb-frappe          Replace stock apps/frappe with the licensed KB Frappe fork (--force)
 kb manage   (alias: m)     Interactive manage submenu (uninstall from site / remove from bench)
-kb upgrade  (alias: up)    Download latest release, rebuild assets, and migrate KB apps already in bench (--apps)
+kb upgrade  (alias: up)    Download latest release, rebuild assets, and migrate KB apps already in bench (--apps, --skip-frappe-check)
 kb activate (alias: a)     Activate this machine with a KB Pro license key
 kb license                 Show current license status (live server check)
 kb update   (alias: u)     Check GitHub and optionally replace the kb binary (see Self-update)
