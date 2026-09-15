@@ -25,11 +25,11 @@ func init() {
 // DisableColors strips colour from all styles.
 // Called on --no-color flag or when NO_COLOR env var is set.
 func DisableColors() {
-	Title   = lipgloss.NewStyle().Bold(true)
+	Title = lipgloss.NewStyle().Bold(true)
 	Success = lipgloss.NewStyle()
 	Failure = lipgloss.NewStyle()
-	Warn    = lipgloss.NewStyle()
-	Dim     = lipgloss.NewStyle()
+	Warn = lipgloss.NewStyle()
+	Dim = lipgloss.NewStyle()
 	AppName = lipgloss.NewStyle()
-	Bold    = lipgloss.NewStyle().Bold(true)
+	Bold = lipgloss.NewStyle().Bold(true)
 }

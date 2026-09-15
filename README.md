@@ -183,7 +183,7 @@ From the main menu, **License** opens a submenu where you can:
 
 - **View status** — same output as **`kb license`** (tier, expiry, allowed apps; hits the license server to reflect any revocations or bans before displaying).
 - **Activate / reactivate** — same flow as **`kb activate`** (saved key, interactive prompt, or paste a new key).
-- **Deactivate locally** — after confirmation, deletes **`~/.config/kb/license.json`**, **`license.jwt`**, and **`license_key`**. The license server is not contacted; an activation may still count on the server until removed there. There is no separate **`kb deactivate`** subcommand — use this menu action or delete those files manually.
+- **Deactivate locally** — after confirmation, deletes **`~/.config/kb/license.json`**, **`license.jwt`**, **`license_key`**, and **`previous-fingerprint`** (the installation id in **`machine-id`** is kept, so re-activating reuses the same seat). The license server is not contacted; an activation may still count on the server until removed there. There is no separate **`kb deactivate`** subcommand — use this menu action or delete those files manually.
 
 Equivalent shell commands:
 
@@ -203,6 +203,16 @@ A **blocking** `POST /heartbeat` (5-second timeout) runs before **`kb install`**
 
 Separately, on commands that run the normal startup license hook, if **`last_check`** in `~/.config/kb/license.json` is older than **24 hours**, a **background** heartbeat refreshes the JWT without blocking the command.
 
+#### Upgrading from 0.7.x
+
+**Identity is now per installation, not per host.** Up to 0.7.x the machine fingerprint was derived from `/etc/machine-id` and the CPU model. A container image bakes `/etc/machine-id` into the image and arm64 has no `model name` in `/proc/cpuinfo`, so every container started from the same image produced the *same* fingerprint and all of them counted as one machine — `max_activations` did not limit container deployments at all. The fingerprint now also mixes in a random 128-bit id created once per installation at `~/.config/kb/machine-id`.
+
+What this means in practice:
+
+- **Every installation must run `kb activate` once after upgrading.** Its fingerprint changed, so the cached token no longer matches; the first command after the upgrade deletes the cached token and prints `this machine's identity changed (kb now identifies each installation separately) — run: kb activate`.
+- **Administrators may need to release stale activations.** The pre-upgrade fingerprint still holds a seat on the server, so re-activation can fail with `activation limit reached`. Release the old one with `kbls remove-activation --key <key> --fingerprint <old>` (the error message prints the old fingerprint when kb still knows it), or raise that key's `--max-activations`.
+- **Reinstalling kb, or recreating a container, now consumes a seat** — the new installation gets a new id. That is the intended trade-off: a seat limit that actually binds is worth an occasional release by an administrator.
+
 ### Configuration & credentials
 
 `~/.config/kb/` stores:
@@ -213,6 +223,8 @@ Separately, on commands that run the normal startup license hook, if **`last_che
 | `license.json` | Cached JWT and last-check timestamp (written by activation / heartbeat). |
 | `license.jwt` | Raw JWT mirrored for the Frappe app. |
 | `license_key` | Stored license key (written on first successful activation). |
+| `machine-id` | Random 128-bit id identifying this installation (mode `0600`, created once, never rewritten). Deleting it changes the fingerprint and costs an activation seat. |
+| `previous-fingerprint` | Fingerprint of the activation superseded when this installation's identity changed; only used to print the `kbls remove-activation` hint. Cleared on the next successful activation. |
 | `error.log` | Timestamped log of every error shown to the user (mode `0600`, capped at ~512 KB). |
 
 `config.json` fields:

@@ -80,6 +80,7 @@ func deleteCache() {
 func ClearLocalLicense() {
 	deleteCache()
 	_ = os.Remove(keyPath())
+	ClearPreviousFingerprint()
 }
 
 // LoadLicenseKey reads the stored license key from ~/.config/kb/license_key.

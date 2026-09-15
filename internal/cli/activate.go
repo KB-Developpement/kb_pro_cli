@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -64,6 +65,10 @@ func runActivate(args []string) error {
 		return fmt.Errorf("no license key provided")
 	}
 
+	// Captured before activation succeeds and overwrites the cache: it names the
+	// seat an administrator has to release when the key is already at its limit.
+	previousFingerprint := license.PreviousFingerprint()
+
 	var token string
 	var activateErr error
 	if spinErr := runWithSpinner("Activating license…", func() {
@@ -77,6 +82,13 @@ func runActivate(args []string) error {
 		return spinErr
 	}
 	if activateErr != nil {
+		// The seat is taken by an activation this installation made before its
+		// identifier changed — say how to free it instead of stopping at
+		// "contact KB-Developpement".
+		if errors.Is(activateErr, license.ErrActivationLimitReached) &&
+			(previousFingerprint != "" || license.LoadLicenseKey() != "") {
+			return fmt.Errorf("%w\n%s", activateErr, license.ActivationLimitHelp(licenseKey, previousFingerprint))
+		}
 		return activateErr
 	}
 
@@ -89,6 +101,8 @@ func runActivate(args []string) error {
 	if err := license.SaveTokenCache(token, time.Now().UTC()); err != nil {
 		return fmt.Errorf("save license token: %w", err)
 	}
+	// This installation now holds a live activation; the stashed one is history.
+	license.ClearPreviousFingerprint()
 
 	if !globalFlags.Quiet {
 		fmt.Fprintln(os.Stdout, ui.Success.Render("License activated successfully."))

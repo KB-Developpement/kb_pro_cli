@@ -67,7 +67,7 @@ func RunCheck() {
 	// invalid immediately. A fingerprint error keeps the previous behaviour
 	// (grace period) — see doHeartbeat.
 	if fp, fpErr := Fingerprint(); fpErr == nil && c.Fingerprint != "" && c.Fingerprint != fp {
-		handleHeartbeatError("fingerprint_mismatch")
+		invalidateForIdentityChange(c.Fingerprint)
 		return
 	}
 
@@ -192,6 +192,26 @@ func errCodeMessage(code string) string {
 	default:
 		return fmt.Sprintf("license check failed: %s", code)
 	}
+}
+
+// invalidateForIdentityChange drops a cached token whose fingerprint claim no
+// longer matches this installation.
+//
+// Since kb identifies each installation rather than each host, every token
+// issued to an older kb mismatches exactly once, on the first command after the
+// upgrade. Remember the fingerprint that token was bound to — an administrator
+// needs it to release the seat it still holds on the server — and, when the
+// user has a license key on disk and can therefore fix this themselves, name
+// the cause instead of leaving a bare "fingerprint changed".
+func invalidateForIdentityChange(previous string) {
+	savePreviousFingerprint(previous)
+	deleteCache()
+	cachedState.Store(nil)
+	if LoadLicenseKey() != "" {
+		fmt.Fprintln(os.Stderr, "warning: this machine's identity changed (kb now identifies each installation separately) — run: kb activate")
+		return
+	}
+	fmt.Fprintln(os.Stderr, "warning: machine fingerprint changed — run: kb activate")
 }
 
 func handleHeartbeatError(errCode string) {

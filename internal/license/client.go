@@ -33,7 +33,7 @@ var httpClient = newClient()
 
 func newClient() *resty.Client {
 	return resty.New().
-		SetTimeout(15 * time.Second).
+		SetTimeout(15*time.Second).
 		SetHeader("Content-Type", "application/json").
 		SetHeader("Accept", "application/json")
 }
@@ -76,7 +76,9 @@ func Activate(serverBaseURL, licenseKey, fingerprint string) (string, error) {
 		}
 		return "", fmt.Errorf("activation denied: %s", apiErr.Error)
 	case http.StatusConflict:
-		return "", fmt.Errorf("activation limit reached — contact KB-Developpement to add more machines")
+		// Wrapped so callers can recognise this case and append the operator
+		// remedy without matching on the message text.
+		return "", fmt.Errorf("%w — contact KB-Developpement to add more machines", ErrActivationLimitReached)
 	default:
 		return "", fmt.Errorf("license server returned HTTP %d", r.StatusCode())
 	}
@@ -85,9 +87,9 @@ func Activate(serverBaseURL, licenseKey, fingerprint string) (string, error) {
 // Heartbeat calls POST /heartbeat to refresh a JWT.
 // Returns the new token string, or a specific error for each failure mode.
 type HeartbeatResult struct {
-	Token     string
-	Err       error
-	ErrCode   string // empty on success; "contract_expired", "license_revoked", etc.
+	Token   string
+	Err     error
+	ErrCode string // empty on success; "contract_expired", "license_revoked", etc.
 }
 
 // Heartbeat refreshes the JWT. Network errors return HeartbeatResult.Err without

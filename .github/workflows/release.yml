@@ -25,6 +25,19 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Format check
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

@@ -3,7 +3,9 @@ package license
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,5 +120,72 @@ func TestRunCheck_CorruptCacheIsDeleted(t *testing.T) {
 
 	if _, err := os.Stat(cachePath()); !os.IsNotExist(err) {
 		t.Errorf("corrupt license cache should be deleted, stat err = %v", err)
+	}
+}
+
+// captureStderr swaps os.Stderr for a pipe while fn runs and returns what was
+// written. Output here is a line or two, well under the pipe buffer.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	fn()
+	os.Stderr = orig
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe: %v", err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	_ = r.Close()
+	return string(data)
+}
+
+const foreignFingerprint = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+// Upgrading kb changes this installation's identifier, so every token issued to
+// an older kb mismatches exactly once. When a license key is stored locally the
+// user can fix it themselves, so say what happened and what to run.
+func TestRunCheck_IdentityChangeGuidance(t *testing.T) {
+	setupSignedCache(t, func(*testing.T) string { return foreignFingerprint })
+	if err := SaveLicenseKey("KB-ACME-123"); err != nil {
+		t.Fatalf("SaveLicenseKey: %v", err)
+	}
+
+	out := captureStderr(t, RunCheck)
+
+	if !strings.Contains(out, "identifies each installation separately") {
+		t.Errorf("warning does not name the cause:\n%s", out)
+	}
+	if !strings.Contains(out, "kb activate") {
+		t.Errorf("warning does not name the fix:\n%s", out)
+	}
+	if _, err := os.Stat(cachePath()); !os.IsNotExist(err) {
+		t.Errorf("license cache should have been deleted, stat err = %v", err)
+	}
+	if s := CurrentState(); s != nil {
+		t.Errorf("CurrentState = %+v, want nil", s)
+	}
+	if got := PreviousFingerprint(); got != foreignFingerprint {
+		t.Errorf("PreviousFingerprint = %q, want the invalidated token's claim", got)
+	}
+}
+
+// Without a stored key the guidance would be useless — keep the old wording.
+func TestRunCheck_ForeignFingerprintWithoutKeyKeepsGenericWarning(t *testing.T) {
+	setupSignedCache(t, func(*testing.T) string { return foreignFingerprint })
+
+	out := captureStderr(t, RunCheck)
+
+	if strings.Contains(out, "identifies each installation separately") {
+		t.Errorf("upgrade guidance shown with no license key stored:\n%s", out)
+	}
+	if !strings.Contains(out, "machine fingerprint changed") {
+		t.Errorf("expected the generic warning:\n%s", out)
 	}
 }
