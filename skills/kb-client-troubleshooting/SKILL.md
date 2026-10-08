@@ -82,9 +82,9 @@ a fix. Quick triage:
 | Upgrade error ends "(the previous version was restored)" | Pre-migrate step failed; bench untouched | Fix cause, retry |
 | Upgrade error "NOT rolled back; the previous source is kept at …kb-old" | `bench migrate` failed | `kb-client-apps` → "Upgrade — how it fails" |
 | Operation hung then `context deadline exceeded` | 10 min (install) / 15 min (upgrade) budget hit — large migrate | Run `bench --site <site> migrate` manually and let it finish |
-| Leftover `apps/X.kb-new` | Interrupted extraction | `rm -rf apps/X.kb-new` |
-| Leftover `apps/X.kb-old` | Migrate failure or interrupted upgrade | Keep until the site is healthy, then delete |
-| Warning `apps.json is not valid JSON — refusing to overwrite` | Corrupt `sites/apps.json` | Repair JSON by hand (valid object, one entry per app) |
+| Leftover `apps/X.kb-new` / `apps/X.kb-old` | Interrupted or failed run | The next swap moves them to `.kb/recovery/legacy/` (never deletes); `kb status` lists them. After a migrate failure keep `.kb-old` until the site is healthy |
+| `apps.json is not valid JSON` during finalize | Corrupt `sites/apps.json` | Repair JSON by hand (valid object, one entry per app); the next mutating command replays the pending journal |
+| Every `kb` mutation refuses, naming `.kb/journal.json` | An interrupted transaction needs an operator | Read the message, restore by hand, delete the journal; `kb status` shows its step |
 
 ### Site down after an operation
 
@@ -103,9 +103,9 @@ a fix. Quick triage:
 | Symptom | Fix |
 |---|---|
 | Menu still shows only "Init KB Frappe" after init | Init failed — rerun `kb init-kb-frappe --force` and read the error |
-| `kb init-kb-frappe` says `could not read frappe git remotes … pass --force` | Normal on an already-forked bench (no `.git`); use `--force` to reinstall/upgrade |
+| `kb init-kb-frappe` says `apps/frappe has no .git of its own … pass --force` | Normal on an already-forked bench (no `.git`); use `--force` to reinstall/upgrade |
 | `kb init-kb-frappe` refused `your license does not allow kb_frappe` | Add `kb_frappe` to the client's apps on the server, then `kb license` twice |
-| Bench has `apps/frappe` from a git clone of `KB-Developpement/kb_frappe` | Detected as fork; `kb init-kb-frappe` says nothing to do (use `--force` to replace with the release tarball) |
+| Bench has `apps/frappe` from a git clone (KB fork or a dirty/forked stock clone) | `kb init-kb-frappe` refuses, with or without `--force`; only a clean stock `frappe/frappe` checkout is converted (the stock tree is not kept) |
 
 ## 2. When to escalate to the server operator
 
@@ -117,8 +117,8 @@ that the server issued a token it cannot verify (key rotation in progress).
 
 ## 3. Known gaps (as of kb 0.8.0 / fork 1.0.4, 2026-10-06)
 
-- `kb init-kb-frappe` always takes the latest `kb_frappe` release; it does not
-  choose between the v15 (1.x) and v16 (2.x) lines.
+- `kb init-kb-frappe` is pinned to release line 1 (`kb_frappe` 1.x, Frappe v15); it
+  cannot choose the v16 (2.x) line.
 - The fork's daily refresh needs the site scheduler; on ffm prod the scheduler runs in
   its own container and may not see `~/.config/kb` (unverified).
 - `kb activate <key>` puts the key in shell history; prefer the prompt.

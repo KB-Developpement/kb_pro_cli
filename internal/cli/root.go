@@ -69,6 +69,8 @@ or manage apps from the KB-Developpement GitHub organisation.`,
 	root.AddCommand(newUpgradeCmd())
 	root.AddCommand(newUpdateCmd())
 	root.AddCommand(newManageCmd())
+	root.AddCommand(newStatusCmd())
+	root.AddCommand(newAdoptCmd())
 	root.AddCommand(newActivateCmd())
 	root.AddCommand(newLicenseCmd())
 	root.AddCommand(newCompletionCmd())

@@ -48,10 +48,10 @@ same OS user that runs the bench processes (the fork reads `Path.home()`).
    in every shell that runs `kb`. See `references/environments.md` for ffm dev, ffm prod
    and bare-metal benches.
 3. **Frappe v15 bench for the current fork line.** The live fork is `kb_frappe` 1.x
-   (Frappe v15). A 2.x (Frappe v16) line exists as a tag but is not released; as of
-   2026-10-06, `kb init-kb-frappe` always fetches the latest GitHub release, so a v16
-   bench would receive the v15 fork. Do not run setup on a v16 bench until line
-   selection ships.
+   (Frappe v15). A 2.x (Frappe v16) line exists as a tag but is not released.
+   `kb init-kb-frappe` now pins release line 1 (`major=1`, kb_frappe 1.x) rather than
+   taking GitHub's latest, but there is still no way to choose another line: do not run
+   setup on a v16 bench until line selection ships.
 4. Outbound HTTPS from the bench to `license.kbdev.co` and `api.github.com` /
    `github.com` (the installer and `kb update` use GitHub releases).
 
@@ -121,7 +121,7 @@ If not, fix the client on the server first (`kbls edit-client --apps …`), then
 ## Step 4 — replace stock Frappe with the KB fork
 
 ```sh
-kb init-kb-frappe                      # refuses unless apps/frappe is stock frappe/frappe
+kb init-kb-frappe                      # converts a clean stock frappe/frappe checkout
 kb init-kb-frappe --force --no-input   # scripted; also the way to re-run / upgrade the fork
 ```
 
@@ -139,11 +139,16 @@ It has no timeout; a first run takes ~2 minutes on a small bench and can exceed 
 a large one. Expect the dev server to restart.
 
 Detection rules worth knowing:
-- Stock is detected from `git remote -v` in `apps/frappe` containing `frappe/frappe`.
+- Stock is detected from the remotes of `apps/frappe/.git` (host and exact path, so
+  `frappe/frappe-fork` is not stock; a parent repository is never consulted). An
+  `apps/frappe` with a `.git` is converted only if it is a clean stock checkout (remotes
+  exactly `frappe/frappe` on GitHub, no changes, no stash, one worktree, one branch with
+  an upstream, no local commits); `--force` bypasses none of that, and the stock tree
+  is not kept.
 - After the swap, `apps/frappe` has **no `.git`** (it came from a tarball). Origin
   detection then errors, which is treated as "not stock": the full menu appears and app
   commands work. `kb init-kb-frappe` without `--force` on such a bench stops with
-  "could not read frappe git remotes … pass --force".
+  "apps/frappe has no .git of its own … pass --force".
 - Verify: `grep __version__ apps/frappe/frappe/__init__.py` → `1.0.x` for the v15 fork.
 
 ## Step 5 — install apps on the site

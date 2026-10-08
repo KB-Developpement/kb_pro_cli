@@ -97,8 +97,8 @@ func runMainMenu() error {
 			switch choice {
 			case menuInitKBFrappe:
 				// Init KB Frappe runs bench build + migrate which can take well over
-				// 10 minutes on a first run — use an unbounded context like runUpgrade.
-				actionErr := runInitKBFrappe(context.Background())
+				// 10 minutes on a first run; runInitKBFrappe applies its own long deadline.
+				actionErr := runInitKBFrappe(context.Background(), false)
 				if actionErr != nil {
 					errlog.Log(actionErr)
 					fmt.Fprintf(os.Stderr, "\n%s %v\n", ui.Failure.Render("Error:"), actionErr)
@@ -149,7 +149,7 @@ func runMainMenu() error {
 			actionErr = runManage(ctx, site, false)
 		case menuUpgrade:
 			cancel() // release the 10-min context; upgrade manages its own per-app timeouts
-			actionErr = runUpgrade(context.Background(), nil)
+			actionErr = runUpgrade(context.Background(), nil, nil)
 		case menuLicense:
 			runLicenseMenu()
 		case menuSettings:

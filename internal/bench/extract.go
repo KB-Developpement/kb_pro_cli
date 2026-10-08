@@ -14,6 +14,13 @@ import (
 // a few MiB; anything beyond this is a decompression bomb, not a release.
 const maxArchiveFileSize = 512 << 20 // 512 MiB
 
+// ExtractArchive extracts a release archive into destDir with its single
+// top-level directory removed. It fails on a truncated or corrupt archive
+// (gzip unexpected EOF) and never writes outside destDir.
+func ExtractArchive(archivePath, destDir string) error {
+	return extractTarGzStripped(archivePath, destDir)
+}
+
 // extractTarGzStripped extracts a .tar.gz into destDir, dropping the first path
 // component of every member (the single top-level directory that GitHub source
 // tarballs carry) — the semantics of `tar --strip-components=1`.
@@ -44,6 +51,12 @@ func extractTarGzStripped(archivePath, destDir string) error {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
+			// The tar stream ended. Read the gzip stream to its own end so the
+			// trailer (CRC-32 and length) is verified: an archive cut short
+			// after the last tar block must not look complete.
+			if _, drainErr := io.Copy(io.Discard, gr); drainErr != nil {
+				return fmt.Errorf("verify archive: %w", drainErr)
+			}
 			return nil
 		}
 		if err != nil {

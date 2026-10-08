@@ -25,6 +25,15 @@ func init() {
 	logPath = filepath.Join(logDir, logFileName)
 }
 
+// SetDir moves the log to dir/error.log. Tests use it so that exercising error
+// paths never writes into the developer's real ~/.config/kb/error.log.
+func SetDir(dir string) {
+	mu.Lock()
+	defer mu.Unlock()
+	logDir = dir
+	logPath = filepath.Join(dir, logFileName)
+}
+
 // Log appends a timestamped error entry to ~/.config/kb/error.log.
 // It is safe for concurrent use. Errors from the logger itself are silently
 // discarded — logging must never break the CLI.

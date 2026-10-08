@@ -44,12 +44,13 @@ func fakeGitOnPath(t *testing.T, remotes string, exitCode int) {
 	t.Setenv("PATH", binDir)
 }
 
-// benchWithFrappeDir creates a bench root containing apps/frappe — the working
-// directory `git remote -v` runs from — and points KB_BENCH_ROOT at it.
+// benchWithFrappeDir creates a bench root containing apps/frappe with a .git
+// directory of its own (origin detection refuses to consult a parent repository)
+// and points KB_BENCH_ROOT at it. The fake git on PATH answers for it.
 func benchWithFrappeDir(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "apps", "frappe"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "apps", "frappe", ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KB_BENCH_ROOT", root)

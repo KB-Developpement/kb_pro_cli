@@ -45,3 +45,32 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 	return nil
 }
+
+// WriteFileDurable is WriteFileAtomic plus an fsync of the containing
+// directory, so the rename itself survives a crash or power loss. Use it for
+// files that carry recovery state (journal, receipts). WriteFileAtomic stays as
+// it is for the license cache and apps.txt.
+func WriteFileDurable(path string, data []byte, mode os.FileMode) error {
+	if err := WriteFileAtomic(path, data, mode); err != nil {
+		return err
+	}
+	return SyncDir(filepath.Dir(path))
+}
+
+// SyncDir fsyncs a directory so entries created or renamed in it are durable.
+func SyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open %s for sync: %w", dir, err)
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		// Some filesystems refuse fsync on a directory; the rename already
+		// happened, so this is not worth failing a transaction over.
+		if isSyncUnsupported(err) {
+			return nil
+		}
+		return fmt.Errorf("sync %s: %w", dir, err)
+	}
+	return nil
+}

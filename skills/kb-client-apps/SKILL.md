@@ -36,6 +36,17 @@ errors see `kb-client-license`; for symptoms without an obvious cause see
 - `install`, `add`, `site-install` and `upgrade` refuse to run while `apps/frappe` is
   still stock Frappe ("apps/frappe is still stock Frappe — run: kb init-kb-frappe first").
   `--skip-frappe-check` overrides — only for a bench you know is fine.
+- Bench mutations (`add`, `install`, `site-install`, `upgrade`, `manage`, `init-kb-frappe`,
+  `adopt`) take a bench-wide lock (`.kb/lock`): a second one fails at once and names
+  the holder's PID. They also refuse when run as a user that does not own the bench root
+  (e.g. root) — run as the bench user.
+- Any app directory that holds a `.git` (clone or linked-worktree file) is **never**
+  replaced or deleted by `kb`; `upgrade`, `add`, `install` and `manage` removal refuse
+  the whole selection before touching anything. Git clones are managed with git.
+  (`init-kb-frappe` makes one exception: a clean stock `frappe/frappe` checkout.)
+- Every install/add/upgrade writes a receipt `.kb/apps/<dir>.json` (repo, tag, commit,
+  archive SHA-256) and an unfinished operation is tracked in `.kb/journal.json`.
+  `kb status` (read-only, no network) shows both, plus retained copies.
 - `--no-input` requires `--apps`. Global flags: `--quiet/-q`, `--verbose` (prints bench
   output on success), `--no-color`. A command where any app failed exits non-zero.
 - `install`, `add`, `upgrade` and `update` first do a blocking license refresh (5 s
@@ -66,14 +77,19 @@ errors see `kb-client-license`; for symptoms without an obvious cause see
    downloaded — will install on site").
 2. Download (up to 3 in parallel, 10 min each) to a temp file. With exactly one app you
    may pin a ref: `kb install --apps kb_pro --version v1.0.14` (tag, branch or commit;
-   ignored with several apps). Default: the repo's latest GitHub **release**.
-3. Per app: extract into `apps/<app>.kb-new` (tar members vetted against path escape and
-   links) → rename to `apps/<app>` → append to `sites/apps.txt` → `bench setup
-   requirements --python <app>` and `--node <app>` → `pip install -e apps/<app>` (uv,
-   pip fallback). A failure here deletes the app dir and its `apps.txt` line.
-   (`bench get-app` is avoided because it requires a git repo.)
-4. Sequentially: `bench build --app <app>` → write `sites/apps.json` (version from
-   `<app>/__init__.py`).
+   refused with several apps). Default: the newest GitHub **release** on the app's
+   release line (`major=1`).
+3. Then, one app at a time **in command-line order**, each in its own journal
+   transaction: extract into `apps/<app>.kb-new` (tar members vetted against path escape
+   and links; the gzip trailer must verify, so a truncated download fails) → rename to
+   `apps/<app>` → append to `sites/apps.txt` → `bench setup requirements --python
+   <app>` and `--node <app>` → `pip install -e apps/<app>` (uv, pip fallback) →
+   `bench build --app <app>`. A failure here deletes the app dir and its `apps.txt`
+   line. (`bench get-app` is avoided because it requires a git repo.)
+4. Finalize: write `.kb/apps/<app>.json` and the `sites/apps.json` entry. If that fails
+   the journal stays pending and the **next** mutating command replays it first; if the
+   replay fails too, every mutating command refuses and names `.kb/journal.json`. If an
+   app is left pending, the remaining apps are not attempted.
 5. `install` only: `bench --site <site> install-app <app>` (10 min each).
 6. Dev server restarted / started again; on prod a reminder to restart services.
 
@@ -84,16 +100,21 @@ parallel but site installs run in the listed order — list `kb_pro` first.
 ## Upgrade — what actually runs, and how it fails
 
 `kb upgrade --apps kb_pro,kb_compta` processes apps one by one, 15 minutes each:
-download latest release → extract to `apps/<app>.kb-new` → **rename the current tree to
-`apps/<app>.kb-old`** → swap the new tree in → requirements → `pip install -e` →
-`bench build --app` → `bench migrate` (whole bench) → `apps.json` update → delete
-`.kb-old`.
+download the newest release on the app's line → extract to `apps/<app>.kb-new` →
+**rename the current tree to `apps/<app>.kb-old`** → swap the new tree in →
+requirements → `pip install -e` → `bench build --app` → `bench migrate` (whole bench) →
+receipt + `apps.json` → retire `.kb-old`: deleted if the app had a valid receipt, else
+moved to `.kb/recovery/<app>-pre-receipt-<UTC>` (it may hold hand edits; `kb status`
+lists it with its size; deleting it is your decision). A leftover `.kb-old`/`.kb-new`
+from an earlier run is moved to `.kb/recovery/legacy/` before the swap, never deleted.
 
 - Failure **before migrate** (requirements, pip, build): the previous tree is put back
   and re-registered; the error ends with "(the previous version was restored)". The
   bench is as it was. Read `--verbose` output or `~/.config/kb/error.log`, fix the
   cause, retry.
-- Failure **in `bench migrate`**: nothing is rolled back (the schema may be half
+- Failure **in `bench migrate`**: the journal stays at step `swapped` and every later
+  mutating command refuses, printing the old and new source paths, until you resolve it
+  by hand and delete `.kb/journal.json`. Nothing is rolled back (the schema may be half
   migrated). The error says "app files were upgraded and NOT rolled back; the previous
   source is kept at apps/<app>.kb-old". On production, first stop users from writing
   into a half-migrated site: `bench --site <site> set-maintenance-mode on` (and
@@ -112,14 +133,12 @@ download latest release → extract to `apps/<app>.kb-new` → **rename the curr
      new migration did not run.
   4. "ROLLBACK FAILED — previous version left at …" means the automatic restore could
      not rename; move the directory back by hand as above.
-- Upgrade always fetches the latest release; there is no `--version` on upgrade. To pin
-  or downgrade one app that is installed on the site (back up the site first —
-  a downgrade does not undo migrations):
-  `mv apps/<app> apps/<app>.before-pin` → `kb add --no-input --apps <app> --version <tag>`
-  (add only checks the bench directory, so it accepts an app the site already has) →
-  `bench --site <site> migrate` → restart services → delete `apps/<app>.before-pin`
-  once the site works. Do not use `kb manage` → "Remove from bench" for this: it
-  uninstalls the app from the site and deletes its data.
+- `kb upgrade --to <app>=<tag>` (repeatable) deploys exactly that **published release**
+  (the server must confirm it is not a draft, prerelease, branch or bare commit); with
+  `--to` and no `--apps`, only the `--to` apps upgrade. It keeps the same guards and
+  retention as any upgrade, and a downgrade does not undo migrations (back up first).
+  Do not use `kb manage` → "Remove from bench" to re-pin: it uninstalls the app from
+  the site and deletes its data.
 - Upgrades need roughly twice the app's disk space while running.
 - Take a site backup before upgrading production: `bench --site <site> backup
   --with-files`.
@@ -135,17 +154,16 @@ grep __version__ apps/frappe/frappe/__init__.py
 ```
 
 It uses the same `.kb-old` swap, rollback-before-migrate rule and dev-server handling as
-upgrade. It always takes the **latest release** of `kb_frappe`. As of 2026-10-06 that
-is the 1.x (Frappe v15) line; a published 2.x (v16) release would become "latest" and
-must not be pulled onto a v15 bench — check
-`https://github.com/KB-Developpement/kb_frappe/releases` (or ask KB staff) before
-upgrading the fork if a 2.x release exists.
+upgrade. It takes the newest `kb_frappe` release on **line 1** (1.x, Frappe v15); the
+line is pinned, so a published 2.x (v16) release does not become "latest" for it. An
+`apps/frappe` that holds a `.git` is refused unless it is a clean stock checkout.
 
 ## Manage (uninstall / remove)
 
 `kb manage` → "Uninstall from site" runs `bench --site <site> uninstall-app <app>`
 (asks for confirmation; source stays). "Remove from bench" uninstalls from the site if
-needed, then `bench remove-app <app>`. Interactive only. Data of an uninstalled app is
+needed, then `bench remove-app <app>` (an app directory holding a `.git` is refused
+before the first uninstall, for the whole selection). Interactive only. Data of an uninstalled app is
 deleted by Frappe — back up first. After uninstalling a licensed app the fork stops
 requiring it in the license.
 
@@ -176,10 +194,15 @@ requiring it in the license.
 ```sh
 bench --site <site> list-apps          # installed apps and versions
 cat sites/apps.json | head -40          # versions kb recorded
-ls apps | grep -E '\.kb-(old|new)$'     # leftovers mean an interrupted/failed operation
+kb status                               # provenance, journal step, retained copies (read-only)
 tail -20 ~/.config/kb/error.log
 ```
 
-A leftover `apps/<app>.kb-new` is a stale staging dir (safe to delete). A leftover
-`apps/<app>.kb-old` is the previous source after a migrate failure — keep it until the
-site is confirmed healthy. See `references/failure-messages.md` for exact messages.
+A `apps/<app>.kb-old` is the previous source after a migrate failure — keep it until the
+site is confirmed healthy. Old `.kb-old`/`.kb-new` leftovers are moved (not deleted) to
+`.kb/recovery/legacy/` by the next swap and listed by `kb status`.
+
+`kb adopt` gives an archive bench installed before receipts existed its first receipt
+(`kb adopt --check` compares only; `--tag <app>=<tag>` names the release when the
+version hint is wrong). It never changes `apps/`, sites or the database; exit codes
+0 adopted, 2 mismatch, 3 ambiguous, 4 refused. See `references/failure-messages.md` for exact messages.

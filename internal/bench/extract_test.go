@@ -4,10 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -132,23 +130,5 @@ func TestExtractTarGzStripped_SymlinkThenFileThrough(t *testing.T) {
 		if _, statErr := os.Stat(filepath.Join(dest, "esc", "pwned.txt")); statErr != nil {
 			t.Fatalf("payload neither rejected nor contained: %v", statErr)
 		}
-	}
-}
-
-// The bench helpers must not shell out for extraction.
-func TestUpdateFromArchive_NoTarBinaryNeeded(t *testing.T) {
-	root, archive := makeTempBench(t, "kb_test")
-	t.Setenv("KB_BENCH_ROOT", root)
-	t.Setenv("PATH", t.TempDir()) // empty PATH: neither tar nor bench exist
-
-	_, err := UpdateFromArchive(context.Background(), archive, "kb_test")
-	if err == nil {
-		t.Fatal("expected failure at the bench step")
-	}
-	if strings.Contains(err.Error(), "extract archive") {
-		t.Fatalf("extraction must not depend on an external tar: %v", err)
-	}
-	if got := marker(t, filepath.Join(root, "apps", "kb_test")); got != "OLD" {
-		t.Errorf("app content = %q, want OLD", got)
 	}
 }

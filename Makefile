@@ -13,7 +13,7 @@ LDFLAGS := -s -w \
 	-X github.com/KB-Developpement/kb_pro_cli/internal/version.Commit=$(COMMIT) \
 	-X github.com/KB-Developpement/kb_pro_cli/internal/version.Date=$(DATE)
 
-.PHONY: build install clean test tidy vet fmt help
+.PHONY: build install clean test test-fault tidy vet fmt help
 
 ## build: compile linux/amd64 binary to ./bin/kb
 build:
@@ -27,6 +27,10 @@ install:
 ## test: run all tests with race detector
 test:
 	go test -race ./...
+
+## test-fault: run all tests with the SIGKILL kill points compiled in (build tag kbfault)
+test-fault:
+	go test -race -tags kbfault ./...
 
 ## tidy: tidy and verify module dependencies
 tidy:

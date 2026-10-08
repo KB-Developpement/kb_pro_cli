@@ -21,6 +21,10 @@ func benchDir() string {
 	return defaultBenchDir
 }
 
+// Root returns the bench root every bench operation uses (KB_BENCH_ROOT or the
+// container default).
+func Root() string { return benchDir() }
+
 // InBenchContainer returns true if the current environment looks like a Frappe bench container.
 func InBenchContainer() bool {
 	info, err := os.Stat(benchDir() + "/apps")
@@ -113,30 +117,6 @@ func DetectAppsInBench() map[string]bool {
 		}
 	}
 	return result
-}
-
-// DetectFrappeOrigin checks the git remotes of apps/frappe to determine whether
-// it is the stock Frappe repo (frappe/frappe) or the KB fork (KB-Developpement/kb_frappe).
-// Returns (true, nil) for stock Frappe, (false, nil) for the KB fork.
-// Returns a non-nil error when the directory is absent or has no recognisable remote.
-// All remote names are checked (origin, upstream, etc.) to handle different bench setups.
-func DetectFrappeOrigin() (isStock bool, err error) {
-	frappeDir := filepath.Join(benchDir(), "apps", "frappe")
-	cmd := exec.Command("git", "remote", "-v")
-	cmd.Dir = frappeDir
-	out, runErr := cmd.Output()
-	if runErr != nil {
-		return false, fmt.Errorf("could not read frappe git remotes: %w", runErr)
-	}
-	remotes := string(out)
-	switch {
-	case strings.Contains(remotes, "KB-Developpement/kb_frappe"):
-		return false, nil
-	case strings.Contains(remotes, "frappe/frappe"):
-		return true, nil
-	default:
-		return false, fmt.Errorf("unrecognised frappe remotes — cannot determine Frappe origin")
-	}
 }
 
 // DetectInstalledApps returns a set of app names currently installed on the given site.

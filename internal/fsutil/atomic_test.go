@@ -50,3 +50,28 @@ func TestWriteFileAtomic_MissingDir(t *testing.T) {
 		t.Error("expected an error when the parent directory does not exist")
 	}
 }
+
+func TestWriteFileDurable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	if err := WriteFileDurable(path, []byte("one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileDurable(path, []byte("two"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "two" {
+		t.Fatalf("content = %q, %v", data, err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v", fi.Mode().Perm())
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("temp files left behind: %v", entries)
+	}
+	if err := SyncDir(filepath.Join(dir, "missing")); err == nil {
+		t.Error("SyncDir on a missing directory did not fail")
+	}
+}

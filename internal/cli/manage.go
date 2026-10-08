@@ -13,6 +13,7 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/apps"
 	"github.com/KB-Developpement/kb_pro_cli/internal/bench"
 	"github.com/KB-Developpement/kb_pro_cli/internal/errlog"
+	"github.com/KB-Developpement/kb_pro_cli/internal/kbstate"
 	"github.com/KB-Developpement/kb_pro_cli/internal/ui"
 )
 
@@ -85,12 +86,15 @@ func runManage(ctx context.Context, site string, force bool) error {
 			return nil // Esc / Ctrl+C — return to caller
 		}
 
+		// Each chosen action is one complete mutation: it takes the bench lock,
+		// recovers an interrupted transaction first, and releases the lock
+		// before the menu waits for the next choice.
 		var actionErr error
 		switch action {
 		case manageUninstall:
-			actionErr = runManageUninstall(ctx, site, installed, force)
+			actionErr = runLocked(ctx, func() error { return runManageUninstall(ctx, site, installed, force) })
 		case manageRemove:
-			actionErr = runManageRemove(ctx, site, installed, inBench, force)
+			actionErr = runLocked(ctx, func() error { return runManageRemove(ctx, site, installed, inBench, force) })
 		}
 		if actionErr != nil {
 			errlog.Log(actionErr)
@@ -164,7 +168,7 @@ func runManageUninstall(ctx context.Context, site string, installed map[string]b
 func runManageRemove(ctx context.Context, site string, installed, inBench map[string]bool, force bool) error {
 	var selectable []apps.App
 	for _, app := range apps.All {
-		if inBench[app.Name] {
+		if inBench[app.Dir()] {
 			selectable = append(selectable, app)
 		}
 	}
@@ -214,6 +218,22 @@ func runManageRemove(ctx context.Context, site string, installed, inBench map[st
 	}
 
 	fmt.Fprintln(os.Stdout)
+	results, err := removeApps(ctx, site, selected, installed, force)
+	if err != nil {
+		return err
+	}
+	printSummary(results)
+	return nil
+}
+
+// removeApps removes the selected apps from the site and the bench. The whole
+// selection is preflighted first: if any app directory holds a .git, nothing is
+// uninstalled and nothing is deleted. A removed app's receipt goes with it, so a
+// stale receipt can never vouch for a different tree later.
+func removeApps(ctx context.Context, site string, selected []string, installed map[string]bool, force bool) ([]installResult, error) {
+	if err := guardApps(selected); err != nil {
+		return nil, err
+	}
 	results := make([]installResult, 0, len(selected))
 	for _, name := range selected {
 		var opErr error
@@ -246,6 +266,13 @@ func runManageRemove(ctx context.Context, site string, installed, inBench map[st
 				fmt.Fprintln(os.Stdout, ui.Dim.Render(opOut))
 			}
 		}
+		if opErr == nil {
+			if a, ok := apps.ByName(name); ok {
+				if rmErr := kbstate.RemoveReceipt(bench.Root(), a.Dir()); rmErr != nil {
+					errlog.Logf("manage remove %s: delete receipt: %v", name, rmErr)
+				}
+			}
+		}
 		if opErr != nil {
 			errlog.Logf("manage remove %s: %v", name, opErr)
 			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), opErr)
@@ -254,6 +281,5 @@ func runManageRemove(ctx context.Context, site string, installed, inBench map[st
 		}
 		results = append(results, installResult{name, opErr})
 	}
-	printSummary(results)
-	return nil
+	return results, nil
 }

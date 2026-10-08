@@ -24,7 +24,9 @@ import (
 	"github.com/KB-Developpement/kb_pro_cli/internal/version"
 )
 
-const githubReleasesAPI = "https://api.github.com/repos/KB-Developpement/kb_pro_cli/releases/latest"
+// githubReleasesAPI is where `kb update` looks for the latest release. It is a
+// variable only so tests can point it at a stub.
+var githubReleasesAPI = "https://api.github.com/repos/KB-Developpement/kb_pro_cli/releases/latest"
 
 type githubRelease struct {
 	TagName string `json:"tag_name"`
@@ -216,8 +218,12 @@ func downloadAndInstall(downloadURL, checksumsURL, assetName string) error {
 	return replaceBinary(binData)
 }
 
+// currentExecutable locates the running binary. It is a variable only so a test
+// can aim the in-place swap at a scratch file instead of the test binary.
+var currentExecutable = os.Executable
+
 func replaceBinary(newData []byte) error {
-	exePath, err := os.Executable()
+	exePath, err := currentExecutable()
 	if err != nil {
 		return fmt.Errorf("finding executable path: %w", err)
 	}

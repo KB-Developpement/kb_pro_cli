@@ -9,6 +9,7 @@ import (
 	"github.com/go-resty/resty/v2"
 
 	"github.com/KB-Developpement/kb_pro_cli/internal/config"
+	"github.com/KB-Developpement/kb_pro_cli/internal/version"
 )
 
 // resolveServerURL returns the license server base URL (see config.ResolveLicenseServerURL).
@@ -35,7 +36,13 @@ func newClient() *resty.Client {
 	return resty.New().
 		SetTimeout(15*time.Second).
 		SetHeader("Content-Type", "application/json").
-		SetHeader("Accept", "application/json")
+		SetHeader("Accept", "application/json").
+		// Read at request time, not at package init, so it always reflects
+		// version.Version (set by -ldflags, or "dev").
+		OnBeforeRequest(func(_ *resty.Client, r *resty.Request) error {
+			r.SetHeader(CLIVersionHeader, version.Version)
+			return nil
+		})
 }
 
 // Activate calls POST /activate on the license server and returns a fresh JWT.

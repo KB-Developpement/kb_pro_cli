@@ -58,7 +58,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
-	cmd.Flags().StringVar(&versionFlag, "version", "", "Git tag, branch, or commit — one app only (default: latest release)")
+	cmd.Flags().StringVar(&versionFlag, "version", "", "Git tag, branch, or commit — one app only (default: the latest release on the app's line)")
 	cmd.Flags().BoolVar(&skipFrappeCheck, "skip-frappe-check", false, "Run even if apps/frappe is still stock Frappe")
 	return cmd
 }
@@ -155,19 +155,55 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&appsFlag, "apps", "", "Comma-separated list of app names (required with --no-input)")
-	cmd.Flags().StringVar(&versionFlag, "version", "", "Git tag, branch, or commit — one app only (default: latest release)")
+	cmd.Flags().StringVar(&versionFlag, "version", "", "Git tag, branch, or commit — one app only (default: the latest release on the app's line)")
 	cmd.Flags().BoolVar(&skipFrappeCheck, "skip-frappe-check", false, "Run even if apps/frappe is still stock Frappe")
 	return cmd
 }
 
 // ── Core runners ─────────────────────────────────────────────────────────────
 
+// errNotAttempted marks an app that was never started because an earlier app
+// left the journal pending: nothing else may touch the bench until it resolves.
+var errNotAttempted = errors.New("not attempted: an earlier app left the journal pending — fix that first")
+
+// refuseVersionWithMany rejects --version when more than one app is selected.
+// A tag, branch or commit names one repository's ref; applying it to several
+// apps silently used the latest release for each instead.
+func refuseVersionWithMany(selected []string, version string) error {
+	if len(selected) > 1 && strings.TrimSpace(version) != "" {
+		return fmt.Errorf("--version can be used with exactly one app, but %d apps were selected — run the apps one at a time, or drop --version to get each app's line release", len(selected))
+	}
+	return nil
+}
+
+// guardApps preflights the Git guard for a whole selection of license ids. Names
+// that are not registry apps are left to the caller's own validation.
+func guardApps(names []string) error {
+	var dirs []string
+	for _, n := range names {
+		if a, ok := apps.ByName(n); ok {
+			dirs = append(dirs, a.Dir())
+		}
+	}
+	return bench.GitGuardAll(bench.Root(), dirs)
+}
+
 // runAdd downloads selected apps into the bench and performs all post-download
-// steps: pip install -e (inside GetAppFromArchive), bench build, apps.json sync.
+// steps: pip install -e, bench build, apps.json sync.
 func runAdd(ctx context.Context, preselected []string, versionFromFlag string) error {
+	if err := refuseVersionWithMany(preselected, versionFromFlag); err != nil {
+		return err
+	}
+	return runLocked(ctx, func() error { return doAdd(ctx, preselected, versionFromFlag) })
+}
+
+func doAdd(ctx context.Context, preselected []string, versionFromFlag string) error {
 	// Sampled before anything touches apps/ — see devServerAction.
 	devWasRunning := bench.IsDevServerRunning()
 
+	if err := guardApps(preselected); err != nil {
+		return err
+	}
 	token, serverURL, err := licenseTokenAndServer(ctx)
 	if err != nil {
 		return err
@@ -177,12 +213,12 @@ func runAdd(ctx context.Context, preselected []string, versionFromFlag string) e
 
 	var alreadyPresent, notLicensed []string
 	var selectable []apps.App
-	allowedSet := license.AllowedSet()
+	allowedSet := allowedSetFn()
 	for _, app := range apps.All {
 		switch {
 		case !allowedSet[app.Name]:
 			notLicensed = append(notLicensed, app.Name)
-		case inBench[app.Name]:
+		case inBench[app.Dir()]:
 			alreadyPresent = append(alreadyPresent, app.Name)
 		default:
 			selectable = append(selectable, app)
@@ -216,9 +252,9 @@ func runAdd(ctx context.Context, preselected []string, versionFromFlag string) e
 	}
 
 	fmt.Fprintln(os.Stdout)
-	dlResults := downloadApps(ctx, selected, downloadRef, serverURL, token)
+	dlResults := downloadApps(ctx, appsByNames(selected), downloadRef, serverURL, token)
 
-	results := postDownloadSteps(ctx, dlResults, true)
+	results := applyDownloads(ctx, bench.CmdAdd, dlResults, true)
 	if anySucceeded(results) {
 		fmt.Fprintln(os.Stdout)
 		maybeRestartDevServer(ctx, devWasRunning)
@@ -230,10 +266,14 @@ func runAdd(ctx context.Context, preselected []string, versionFromFlag string) e
 
 // runSiteInstall installs already-downloaded apps onto the given site.
 func runSiteInstall(ctx context.Context, site string, preselected []string) error {
+	return runLocked(ctx, func() error { return doSiteInstall(ctx, site, preselected) })
+}
+
+func doSiteInstall(ctx context.Context, site string, preselected []string) error {
 	// Sampled before anything touches apps/ — see devServerAction.
 	devWasRunning := bench.IsDevServerRunning()
 
-	allowedSet := license.AllowedSet()
+	allowedSet := allowedSetFn()
 	if allowedSet == nil {
 		return fmt.Errorf("license required to install apps — run: kb activate")
 	}
@@ -246,7 +286,7 @@ func runSiteInstall(ctx context.Context, site string, preselected []string) erro
 
 	var selectable []apps.App
 	for _, app := range apps.All {
-		if inBench[app.Name] && !installed[app.Name] && allowedSet[app.Name] {
+		if inBench[app.Dir()] && !installed[app.Name] && allowedSet[app.Name] {
 			selectable = append(selectable, app)
 		}
 	}
@@ -337,9 +377,21 @@ func installOptionLabel(name string, inBench bool) string {
 
 // runInstall downloads selected apps when needed and installs them on the site.
 func runInstall(ctx context.Context, site string, preselected []string, versionFromFlag string) error {
+	if err := refuseVersionWithMany(preselected, versionFromFlag); err != nil {
+		return err
+	}
+	return runLocked(ctx, func() error { return doInstall(ctx, site, preselected, versionFromFlag) })
+}
+
+func doInstall(ctx context.Context, site string, preselected []string, versionFromFlag string) error {
 	// Sampled before anything touches apps/ — see devServerAction.
 	devWasRunning := bench.IsDevServerRunning()
 
+	// The whole named selection is refused if any of its directories holds a
+	// .git, including apps that would only be site-installed.
+	if err := guardApps(preselected); err != nil {
+		return err
+	}
 	token, serverURL, err := licenseTokenAndServer(ctx)
 	if err != nil {
 		return err
@@ -350,7 +402,7 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 		fmt.Fprintln(os.Stderr, ui.Dim.Render("Warning: could not detect installed apps — all apps will be shown"))
 	}
 	inBench := bench.DetectAppsInBench()
-	allowedSet := license.AllowedSet()
+	allowedSet := allowedSetFn()
 
 	if !globalFlags.Quiet {
 		var alreadyInstalled, notLicensed []string
@@ -378,9 +430,12 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 			return nil
 		}
 		selected, err = selectAppsInteractive(selectable, "Select KB apps to install", func(a apps.App) string {
-			return installOptionLabel(a.Name, inBench[a.Name])
+			return installOptionLabel(a.Name, inBench[a.Dir()])
 		})
 		if err != nil || len(selected) == 0 {
+			return err
+		}
+		if err := guardApps(selected); err != nil {
 			return err
 		}
 	}
@@ -403,25 +458,43 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 
 		fmt.Fprintln(os.Stdout)
 
-		// Phase 1: parallel download + extraction + pip install.
-		dlResults := downloadApps(ctx, plan.Download, downloadRef, serverURL, token)
+		// Phase 1: parallel downloads (outside the bench).
+		dlResults := downloadApps(ctx, appsByNames(plan.Download), downloadRef, serverURL, token)
 
-		// Phase 2: sequential bench build + apps.json sync.
-		addResults = postDownloadSteps(ctx, dlResults, false)
+		// Phase 2: sequential, in input order, one journal transaction per app:
+		// extraction, apps.txt, requirements, pip, build, apps.json, receipt.
+		addResults = applyDownloads(ctx, bench.CmdInstall, dlResults, false)
 	}
 
 	// Phase 3: sequential bench install-app — for apps that passed phase 2 and
-	// for apps that were already downloaded into the bench.
+	// for apps that were already downloaded into the bench. Nothing runs after
+	// an app left the journal pending.
 	fmt.Fprintln(os.Stdout)
+	stopped := false
+	for _, r := range addResults {
+		if errors.Is(r.err, bench.ErrJournalPending) {
+			stopped = true
+		}
+	}
 	var installResults []installResult
 	for _, r := range addResults {
 		if r.err != nil {
 			installResults = append(installResults, r)
 			continue
 		}
+		if stopped {
+			installResults = append(installResults, installResult{r.name, errNotAttempted})
+			continue
+		}
 		installResults = append(installResults, siteInstallApps(ctx, site, []string{r.name})...)
 	}
-	installResults = append(installResults, siteInstallApps(ctx, site, plan.SiteInstallOnly)...)
+	if stopped {
+		for _, n := range plan.SiteInstallOnly {
+			installResults = append(installResults, installResult{n, errNotAttempted})
+		}
+	} else {
+		installResults = append(installResults, siteInstallApps(ctx, site, plan.SiteInstallOnly)...)
+	}
 
 	if anySucceeded(installResults) {
 		fmt.Fprintln(os.Stdout)
@@ -432,47 +505,57 @@ func runInstall(ctx context.Context, site string, preselected []string, versionF
 	return summaryError(failures, len(installResults))
 }
 
-// ── Shared download + post-download helpers ───────────────────────────────────
+// ── Shared download + apply helpers ───────────────────────────────────────────
 
 type dlResult struct {
-	name string
-	out  string
-	err  error
+	app apps.App
+	dl  *license.Download
+	err error
 }
 
-// downloadApps fetches and extracts all selected apps in parallel (max 3 concurrent).
-// It never returns an error — per-app failures are captured in the returned slice.
-func downloadApps(ctx context.Context, selected []string, ref, serverURL, token string) []dlResult {
+// appsByNames resolves license ids to registry rows, in the given order.
+func appsByNames(names []string) []apps.App {
+	out := make([]apps.App, 0, len(names))
+	for _, n := range names {
+		if a, ok := apps.ByName(n); ok {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// downloadApps fetches the archives of all selected apps in parallel (bounded
+// by downloadConcurrency) into the OS temp directory, outside the bench. It
+// never returns an error — per-app failures are captured in the returned slice,
+// in input order. ref, when set, is the explicit --version for a single app.
+func downloadApps(ctx context.Context, selected []apps.App, ref, serverURL, token string) []dlResult {
 	results := make([]dlResult, len(selected))
 	var mu sync.Mutex
 
 	fmt.Fprintf(os.Stdout, "Downloading %d app(s) from license server…\n", len(selected))
 
 	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(3)
+	g.SetLimit(downloadConcurrency)
 
-	for i, name := range selected {
+	for i, app := range selected {
 		g.Go(func() error {
 			dlCtx, dlCancel := context.WithTimeout(gCtx, 10*time.Minute)
 			defer dlCancel()
 
-			tmpPath, dlErr := license.DownloadApp(dlCtx, serverURL, token, name, ref)
-			var out string
-			if dlErr == nil {
-				out, dlErr = bench.GetAppFromArchive(dlCtx, tmpPath, name)
-				os.Remove(tmpPath)
-			}
+			dl, dlErr := license.DownloadApp(dlCtx, serverURL, token, license.DownloadRequest{
+				App:        app.LicenseID(),
+				Repository: app.Repository(),
+				Line:       app.Line,
+				Ref:        ref,
+			})
 
 			mu.Lock()
-			results[i] = dlResult{name: name, out: out, err: dlErr}
+			results[i] = dlResult{app: app, dl: dl, err: dlErr}
 			if dlErr != nil {
-				errlog.Logf("download %s: %v", name, dlErr)
-				fmt.Fprintf(os.Stdout, "  %s %s — %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), dlErr)
+				errlog.Logf("download %s: %v", app.Name, dlErr)
+				fmt.Fprintf(os.Stdout, "  %s %s — %v\n", ui.Failure.Render("✗"), ui.AppName.Render(app.Name), dlErr)
 			} else {
-				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(name))
-				if globalFlags.Verbose && out != "" {
-					fmt.Fprintln(os.Stdout, ui.Dim.Render(out))
-				}
+				fmt.Fprintf(os.Stdout, "  %s %s\n", ui.Success.Render("↓"), ui.AppName.Render(app.Name))
 			}
 			mu.Unlock()
 			return nil // never abort sibling downloads on a single failure
@@ -483,49 +566,70 @@ func downloadApps(ctx context.Context, selected []string, ref, serverURL, token 
 	return results
 }
 
-// postDownloadSteps runs bench build and updates apps.json sequentially for each
-// successfully downloaded app. Download failures are passed through silently —
-// they were already printed by downloadApps. When printSuccess is true a ✓ line
-// is printed for each app that passes (used by runAdd as its final output);
-// when false only failures are printed (runInstall prints its own final ✓/✗).
-func postDownloadSteps(ctx context.Context, dlResults []dlResult, printSuccess bool) []installResult {
+// printTransactionNotes reports the copies a transaction kept or moved.
+func printTransactionNotes(app string, res bench.ApplyResult) {
+	for _, l := range res.Legacy {
+		fmt.Fprintf(os.Stdout, "  %s %s: moved a leftover to %s (kb never deletes it)\n", ui.Dim.Render("·"), app, l)
+	}
+	if res.Retained != "" {
+		fmt.Fprintf(os.Stdout, "  %s %s: it had no receipt, so the previous tree is kept at %s — delete it yourself once you are sure\n", ui.Dim.Render("·"), app, res.Retained)
+	}
+	if res.StockDiscarded {
+		fmt.Fprintf(os.Stdout, "  %s %s: the stock Frappe tree was not kept — every commit was already upstream and can be cloned again\n", ui.Dim.Render("·"), app)
+	}
+}
+
+// applyDownloads runs, sequentially in input order, one journal transaction per
+// downloaded app. If an app leaves the journal pending (a failed finalize), the
+// remaining apps are not attempted. printSuccess prints a ✓ line per app
+// (runAdd's final output); runInstall prints its own ✓/✗ later.
+func applyDownloads(ctx context.Context, command string, dlResults []dlResult, printSuccess bool) []installResult {
 	var results []installResult
+	stopped := false
 	for _, dr := range dlResults {
+		name := dr.app.Name
 		if dr.err != nil {
 			// Already printed by downloadApps — just propagate the result.
-			results = append(results, installResult{dr.name, dr.err})
+			results = append(results, installResult{name, dr.err})
+			continue
+		}
+		if stopped {
+			os.Remove(dr.dl.Path)
+			results = append(results, installResult{name, errNotAttempted})
 			continue
 		}
 
 		opCtx, opCancel := context.WithTimeout(ctx, 10*time.Minute)
-		var buildOut string
-		var buildErr error
+		var res bench.ApplyResult
+		var applyErr error
 		if spinErr := runWithSpinner(
-			fmt.Sprintf("Building assets for %s…", ui.AppName.Render(dr.name)),
-			func() { buildOut, buildErr = bench.BuildApp(opCtx, dr.name) },
+			fmt.Sprintf("Adding %s to the bench…", ui.AppName.Render(name)),
+			func() {
+				res, applyErr = bench.ApplyArchive(opCtx, bench.ApplyPlan{Command: command, App: dr.app, Download: dr.dl})
+			},
 		); spinErr != nil {
-			buildErr = spinErr
+			applyErr = spinErr
 		}
 		opCancel()
+		os.Remove(dr.dl.Path)
 
-		if buildErr != nil {
-			errlog.Logf("build %s: %v", dr.name, buildErr)
-			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(dr.name), buildErr)
-			results = append(results, installResult{dr.name, buildErr})
+		if applyErr != nil {
+			errlog.Logf("%s %s: %v", command, name, applyErr)
+			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), applyErr)
+			if errors.Is(applyErr, bench.ErrJournalPending) {
+				stopped = true
+			}
+			results = append(results, installResult{name, applyErr})
 			continue
 		}
-		if globalFlags.Verbose && buildOut != "" {
-			fmt.Fprintln(os.Stdout, ui.Dim.Render(buildOut))
+		if globalFlags.Verbose && res.Output != "" {
+			fmt.Fprintln(os.Stdout, ui.Dim.Render(res.Output))
 		}
-
-		if syncErr := bench.SyncAppState(dr.name); syncErr != nil && !globalFlags.Quiet {
-			fmt.Fprintf(os.Stderr, "  warning: could not update apps.json for %s: %v\n", dr.name, syncErr)
-		}
-
+		printTransactionNotes(name, res)
 		if printSuccess {
-			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(dr.name))
+			fmt.Fprintf(os.Stdout, "%s %s\n", ui.Success.Render("✓"), ui.AppName.Render(name))
 		}
-		results = append(results, installResult{dr.name, nil})
+		results = append(results, installResult{name, nil})
 	}
 	return results
 }
@@ -562,14 +666,14 @@ func siteInstallApps(ctx context.Context, site string, names []string) []install
 
 // licenseTokenAndServer runs a license sync check and returns the cached token and server URL.
 func licenseTokenAndServer(ctx context.Context) (token, serverURL string, err error) {
-	if err = license.RunSyncCheck(ctx); err != nil {
+	if err = syncLicenseFn(ctx); err != nil {
 		return
 	}
-	if license.AllowedSet() == nil {
+	if allowedSetFn() == nil {
 		err = fmt.Errorf("license required to download apps — run: kb activate")
 		return
 	}
-	token, err = license.GetCachedToken()
+	token, err = cachedTokenFn()
 	if err != nil {
 		err = fmt.Errorf("could not read license token: %w", err)
 		return
@@ -627,12 +731,14 @@ func parseAppsFlag(flag string) []string {
 	return out
 }
 
-// resolveDownloadRef returns the Git ref to pass to the license server (empty = latest).
+// resolveDownloadRef returns the Git ref to pass to the license server (empty =
+// the app's registry line). A ref names one repository, so more than one app
+// with a ref is an error, not a silent "latest".
 func resolveDownloadRef(selected []string, versionFromFlag string, usedInteractiveMenu bool) (string, error) {
+	if err := refuseVersionWithMany(selected, versionFromFlag); err != nil {
+		return "", err
+	}
 	if len(selected) != 1 {
-		if len(selected) > 1 && strings.TrimSpace(versionFromFlag) != "" && !globalFlags.Quiet {
-			fmt.Fprintln(os.Stderr, ui.Dim.Render("Ignoring --version: more than one app selected; using latest release for each."))
-		}
 		return "", nil
 	}
 	if usedInteractiveMenu {
@@ -648,7 +754,7 @@ func promptOptionalDownloadRef(appName, defaultRef string) (string, error) {
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Version or tag (optional)").
-				Description(fmt.Sprintf("Git ref for %s — leave blank for latest release", appName)).
+				Description(fmt.Sprintf("Git ref for %s — leave blank for its release line", appName)).
 				Value(&ref),
 		),
 	).WithKeyMap(formKeyMap()).Run()

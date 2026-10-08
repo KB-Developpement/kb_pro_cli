@@ -34,68 +34,11 @@ func RemoveApp(ctx context.Context, appName string) (string, error) {
 	return runBench(ctx, "remove-app", appName)
 }
 
-// GetAppFromArchive installs a new KB app from a .tar.gz source archive.
-//
-// GitHub release tarballs are plain source trees (no `.git`). `bench get-app`
-// crashes on no-git paths, so we use `bench setup requirements` for deps and
-// pip install -e for the editable package registration — matching what
-// bench's own install_app() does after a git clone.
-//
-// The caller is responsible for removing archivePath after this returns.
-func GetAppFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
-	root := benchDir()
-	if _, err := os.Stat(root); err != nil {
-		return "", fmt.Errorf("bench directory %q is not accessible (set KB_BENCH_ROOT): %w", root, err)
-	}
-
-	appDir := filepath.Join(root, "apps", appName)
-	if fi, err := os.Stat(appDir); err == nil && fi.IsDir() {
-		return "", fmt.Errorf("app %q already exists at %s — remove it or use upgrade", appName, appDir)
-	}
-
-	stagingDir := appDir + ".kb-new"
-	_ = os.RemoveAll(stagingDir)
-	if err := os.MkdirAll(stagingDir, 0755); err != nil {
-		return "", fmt.Errorf("create staging dir: %w", err)
-	}
-
-	if err := extractTarGzStripped(archivePath, stagingDir); err != nil {
-		_ = os.RemoveAll(stagingDir)
-		return "", fmt.Errorf("extract archive: %w", err)
-	}
-
-	if err := os.Rename(stagingDir, appDir); err != nil {
-		_ = os.RemoveAll(stagingDir)
-		return "", fmt.Errorf("move app into apps/: %w", err)
-	}
-
-	if err := appendAppToAppsTxt(root, appName); err != nil {
-		_ = os.RemoveAll(appDir)
-		return "", err
-	}
-
-	reqOut, err := setupRequirementsPythonAndNode(ctx, appName)
-	if err != nil {
-		_ = os.RemoveAll(appDir)
-		removeAppFromAppsTxt(root, appName)
-		return "", fmt.Errorf("setup requirements for %s: %w", appName, err)
-	}
-
-	pipOut, err := PipInstallEditable(ctx, appName)
-	if err != nil {
-		_ = os.RemoveAll(appDir)
-		removeAppFromAppsTxt(root, appName)
-		return "", fmt.Errorf("pip install -e for %s: %w", appName, err)
-	}
-
-	return combineBenchOutput(reqOut, pipOut), nil
-}
-
 // PipInstallEditable registers the app as an editable Python package in the bench venv,
 // mirroring bench's own install_app() logic (uv preferred, pip fallback).
-func PipInstallEditable(ctx context.Context, appName string) (string, error) {
+func PipInstallEditable(ctx context.Context, appDirName string) (string, error) {
 	root := benchDir()
-	appPath := filepath.Join(root, "apps", appName)
+	appPath := filepath.Join(root, "apps", appDirName)
 	python := filepath.Join(root, "env", "bin", "python")
 
 	// Try uv first (faster, no global lock).
@@ -132,7 +75,7 @@ type appStateEntry struct {
 // existing entries (which may contain nested objects, ints, or bools) are
 // preserved exactly — a typed struct unmarshal would fail on mixed types and
 // silently wipe the whole file on the next write.
-func SyncAppState(appName string) error {
+func SyncAppState(dir, appName string) error {
 	root := benchDir()
 	path := filepath.Join(root, "sites", "apps.json")
 
@@ -162,7 +105,7 @@ func SyncAppState(appName string) error {
 		Resolution: "not a repo",
 		Required:   []string{},
 		Idx:        idx,
-		Version:    readAppVersion(root, appName),
+		Version:    readAppVersion(root, dir, appName),
 	}
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
@@ -175,121 +118,6 @@ func SyncAppState(appName string) error {
 		return err
 	}
 	return fsutil.WriteFileAtomic(path, out, 0o644)
-}
-
-// UpdateFromArchive upgrades an existing KB app from a .tar.gz source archive.
-//
-// Steps: atomically replace app directory → bench setup requirements (python +
-// node) → pip install -e → bench build → bench migrate. The directory
-// replacement uses a .kb-new sibling on the same filesystem so os.Rename is a
-// cheap atomic syscall, and the previous source is kept as a .kb-old sibling
-// until the upgrade succeeds.
-//
-// Recovery: if any step before `bench migrate` fails, the new directory is
-// removed, the previous source is renamed back into place, pip install -e is
-// re-run on it (best effort) and the returned error says the previous version
-// was restored. If `bench migrate` fails the swap is NOT rolled back (the
-// schema may be half-applied); .kb-old is kept and its path is included in the
-// error so an operator can recover manually.
-//
-// The caller is responsible for removing archivePath after this returns.
-func UpdateFromArchive(ctx context.Context, archivePath, appName string) (string, error) {
-	appDir := filepath.Join(benchDir(), "apps", appName)
-	stagingDir := appDir + ".kb-new"
-
-	_ = os.RemoveAll(stagingDir)
-	if err := os.MkdirAll(stagingDir, 0755); err != nil {
-		return "", fmt.Errorf("create staging dir: %w", err)
-	}
-
-	if err := extractTarGzStripped(archivePath, stagingDir); err != nil {
-		_ = os.RemoveAll(stagingDir)
-		return "", fmt.Errorf("extract archive: %w", err)
-	}
-
-	return swapAppDir(appDir, stagingDir, upgradeSteps{
-		SetupRequirements: func() (string, error) { return setupRequirementsPythonAndNode(ctx, appName) },
-		PipInstall:        func() (string, error) { return PipInstallEditable(ctx, appName) },
-		Build:             func() (string, error) { return BuildApp(ctx, appName) },
-		Migrate:           func() (string, error) { return runBench(ctx, "migrate") },
-	})
-}
-
-// upgradeSteps are the post-swap bench operations. They are injectable so the
-// directory swap and its rollback can be tested without a real bench.
-type upgradeSteps struct {
-	SetupRequirements func() (string, error)
-	PipInstall        func() (string, error)
-	Build             func() (string, error)
-	Migrate           func() (string, error)
-}
-
-// swapAppDir moves stagingDir into appDir (keeping the previous source as
-// appDir+".kb-old"), runs the post-swap steps, and rolls back to the previous
-// source if any step before Migrate fails. See UpdateFromArchive for the
-// recovery contract.
-func swapAppDir(appDir, stagingDir string, steps upgradeSteps) (string, error) {
-	oldDir := appDir + ".kb-old"
-	if err := os.RemoveAll(oldDir); err != nil {
-		_ = os.RemoveAll(stagingDir)
-		return "", fmt.Errorf("remove stale backup %s: %w", oldDir, err)
-	}
-
-	hadOld := false
-	if _, err := os.Stat(appDir); err == nil {
-		if err := os.Rename(appDir, oldDir); err != nil {
-			_ = os.RemoveAll(stagingDir)
-			return "", fmt.Errorf("back up old app dir: %w", err)
-		}
-		hadOld = true
-	}
-
-	// restore puts the previous source back and re-registers it (best effort).
-	restore := func(cause error, stage string) error {
-		if !hadOld {
-			return fmt.Errorf("%s: %w", stage, cause)
-		}
-		_ = os.RemoveAll(appDir)
-		if err := os.Rename(oldDir, appDir); err != nil {
-			return fmt.Errorf("%s: %w (ROLLBACK FAILED — previous version left at %s: %v)", stage, cause, oldDir, err)
-		}
-		if steps.PipInstall != nil {
-			_, _ = steps.PipInstall()
-		}
-		return fmt.Errorf("%s: %w (the previous version was restored)", stage, cause)
-	}
-
-	if err := os.Rename(stagingDir, appDir); err != nil {
-		_ = os.RemoveAll(stagingDir)
-		return "", restore(err, "replace app dir")
-	}
-
-	reqOut, err := steps.SetupRequirements()
-	if err != nil {
-		return reqOut, restore(err, "setup requirements")
-	}
-
-	if _, pipErr := steps.PipInstall(); pipErr != nil {
-		return reqOut, restore(pipErr, "pip install -e")
-	}
-
-	buildOut, err := steps.Build()
-	if err != nil {
-		return combineBenchOutput(reqOut, buildOut), restore(err, "build assets")
-	}
-
-	migrateOut, migrateErr := steps.Migrate()
-	out := combineBenchOutput(reqOut, combineBenchOutput(buildOut, migrateOut))
-	if migrateErr != nil {
-		// Do not roll back: the schema may be half-migrated.
-		if hadOld {
-			return out, fmt.Errorf("bench migrate: %w (app files were upgraded and NOT rolled back; the previous source is kept at %s)", migrateErr, oldDir)
-		}
-		return out, fmt.Errorf("bench migrate: %w", migrateErr)
-	}
-
-	_ = os.RemoveAll(oldDir)
-	return out, nil
 }
 
 // setupRequirementsPythonAndNode runs "bench setup requirements --python" then "--node".
@@ -315,17 +143,18 @@ func combineBenchOutput(a, b string) string {
 	}
 }
 
-// appendAppToAppsTxt adds appName as a line to sites/apps.txt if not already listed.
-func appendAppToAppsTxt(benchRoot, appName string) error {
+// appendAppToAppsTxt adds appName as a line to sites/apps.txt if not already
+// listed. added reports whether this call wrote the line.
+func appendAppToAppsTxt(benchRoot, appName string) (added bool, err error) {
 	path := filepath.Join(benchRoot, "sites", "apps.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read %s: %w (expected a Frappe bench with sites/apps.txt)", path, err)
+		return false, fmt.Errorf("read %s: %w (expected a Frappe bench with sites/apps.txt)", path, err)
 	}
 	content := strings.ReplaceAll(string(data), "\r\n", "\n")
 	for _, line := range strings.Split(content, "\n") {
 		if strings.TrimSpace(line) == appName {
-			return nil
+			return false, nil
 		}
 	}
 	var b strings.Builder
@@ -335,15 +164,19 @@ func appendAppToAppsTxt(benchRoot, appName string) error {
 	}
 	b.WriteString(appName)
 	b.WriteByte('\n')
-	return fsutil.WriteFileAtomic(path, []byte(b.String()), 0o644)
+	if err := fsutil.WriteFileAtomic(path, []byte(b.String()), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-// removeAppFromAppsTxt removes appName from sites/apps.txt (best-effort cleanup).
-func removeAppFromAppsTxt(benchRoot, appName string) {
+// removeAppFromAppsTxt removes appName from sites/apps.txt. A rollback depends
+// on it, so a failure is returned.
+func removeAppFromAppsTxt(benchRoot, appName string) error {
 	path := filepath.Join(benchRoot, "sites", "apps.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return
+		return fmt.Errorf("read %s: %w", path, err)
 	}
 	content := strings.ReplaceAll(string(data), "\r\n", "\n")
 	lines := strings.Split(content, "\n")
@@ -357,21 +190,24 @@ func removeAppFromAppsTxt(benchRoot, appName string) {
 	if result != "" {
 		result += "\n"
 	}
-	_ = fsutil.WriteFileAtomic(path, []byte(result), 0o644)
+	return fsutil.WriteFileAtomic(path, []byte(result), 0o644)
 }
 
-// readAppVersion reads the version string from <app>/<app>/__version__.py,
-// falling back to __version__ in the package <app>/<app>/__init__.py (where
+// ReadAppVersion is readAppVersion for callers outside the package.
+func ReadAppVersion(benchRoot, dir, pkg string) string { return readAppVersion(benchRoot, dir, pkg) }
+
+// readAppVersion reads the version string from apps/<dir>/<pkg>/__version__.py,
+// falling back to __version__ in the package apps/<dir>/<pkg>/__init__.py (where
 // frappe itself and most KB apps declare it), then to app_version in
-// <app>/<app>/hooks.py. Returns "" when no candidate declares a version.
-func readAppVersion(benchRoot, appName string) string {
+// apps/<dir>/<pkg>/hooks.py. Returns "" when no candidate declares a version.
+func readAppVersion(benchRoot, dir, pkg string) string {
 	candidates := []struct {
 		file   string
 		prefix string
 	}{
-		{filepath.Join(benchRoot, "apps", appName, appName, "__version__.py"), "__version__"},
-		{filepath.Join(benchRoot, "apps", appName, appName, "__init__.py"), "__version__"},
-		{filepath.Join(benchRoot, "apps", appName, appName, "hooks.py"), "app_version"},
+		{filepath.Join(benchRoot, "apps", dir, pkg, "__version__.py"), "__version__"},
+		{filepath.Join(benchRoot, "apps", dir, pkg, "__init__.py"), "__version__"},
+		{filepath.Join(benchRoot, "apps", dir, pkg, "hooks.py"), "app_version"},
 	}
 	for _, c := range candidates {
 		data, err := os.ReadFile(c.file)

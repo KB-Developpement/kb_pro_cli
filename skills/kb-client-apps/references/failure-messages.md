@@ -11,6 +11,13 @@ Source: kb_pro_cli v0.8.0. Messages are quoted as printed; `<…>` marks variabl
 | `could not detect site name: … set the active site with: bench use <site>` | Several sites, no `default_site` | `bench use <site>` |
 | `apps/frappe is still stock Frappe — run: kb init-kb-frappe first …` | Stock-Frappe guard | `kb init-kb-frappe`; or `--skip-frappe-check` if you are sure |
 | `license required to download apps — run: kb activate` / `license required to upgrade apps — run: kb activate` | No cached token, or cached token **expired** | `kb license` (refreshes an expired-but-renewable token), run again; else `kb activate` |
+| `another kb operation is running on this bench (PID <n> …)` | `.kb/lock` is held by another `kb` | Wait for it; the lock is released when that process exits |
+| `the bench at … is owned by uid <n> but kb is running as uid <m> — run kb as the bench user` | Run as root / another user | Run as the bench user |
+| `apps/<app> holds a Git checkout (… .git …)` | The app dir has a `.git` (clone or worktree); `kb` never replaces it | Manage it with git, or move the checkout away yourself |
+| `an interrupted <op> of <app> left …/.kb/journal.json at step "…"` | An earlier run died or failed finalization and could not be replayed | Follow the message: restore the printed old source by hand, then delete the journal file |
+| `… lacks valid source-identity headers … server-compatibility requirement` | The license server predates source identity (no `X-KB-*` headers) | Nothing was changed; update the license server |
+| `<file> has schema_version <n> but this kb supports 1` | A newer `kb` wrote `.kb/` state | `kb update` |
+| `--version can be used with exactly one app` | `--version` with several apps | One app per `--version`, or drop it |
 | `specify apps with --apps when using --no-input` | Missing `--apps` | Add `--apps` |
 | `app "<x>" is not available for upgrade (not licensed, not in bench, or unknown)` | Upgrade target not in bench or license | `kb license`; `ls apps/` |
 | `app "<x>" already exists at <dir> — remove it or use upgrade` | `kb add` raced with an existing directory | Use `kb upgrade`, or move the directory aside |
@@ -42,8 +49,7 @@ Source: kb_pro_cli v0.8.0. Messages are quoted as printed; `<…>` marks variabl
 | `site-install <app> on <site>: exit status 1` | `bench install-app` failed — commonly a missing dependency app (install `kb_pro` first) or the fork missing |
 | `bench migrate: … (app files were upgraded and NOT rolled back; the previous source is kept at …kb-old)` | See SKILL.md "Upgrade — how it fails" |
 | `ROLLBACK FAILED — previous version left at <dir>` | Restore the directory manually |
-| `apps.json is not valid JSON — refusing to overwrite` (warning) | `sites/apps.json` is corrupt; fix the JSON by hand. The operation itself succeeded. |
-| `could not update apps.json for <app>` (warning) | Metadata only; app works. |
+| `finalize <dir>: update sites/apps.json: apps.json is not valid JSON` | `sites/apps.json` is corrupt. Finalization failed, so the journal stays pending: fix the JSON by hand; the next mutating command replays it. |
 | `could not detect installed apps — all apps will be shown` (warning) | `bench --site <site> list-apps --format json` failed; check bench health |
 
 ## Summary line

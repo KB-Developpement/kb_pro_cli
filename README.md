@@ -1,6 +1,6 @@
 # kb — KB-Developpement Frappe App Manager
 
-An interactive CLI for installing, managing, upgrading, and licensing KB-Developpement Frappe apps. Setup commands (**`kb init`**, **`kb config`**) work from any machine and store settings in `~/.config/kb`; bench commands (**`kb`**, **`kb install`**, **`kb add`**, **`kb site-install`**, **`kb manage`**, **`kb upgrade`**) require a Frappe bench container (`ffm shell`).
+An interactive CLI for installing, managing, upgrading, and licensing KB-Developpement Frappe apps. Setup commands (**`kb init`**, **`kb config`**) work from any machine and store settings in `~/.config/kb`; bench commands (**`kb`**, **`kb install`**, **`kb add`**, **`kb site-install`**, **`kb manage`**, **`kb upgrade`**, **`kb status`**, **`kb adopt`**) require a Frappe bench container (`ffm shell`).
 
 ## Requirements
 
@@ -89,21 +89,23 @@ kb init-kb-frappe --force              # Replace apps/frappe anyway (unrecognise
 kb init-kb-frappe --force --no-input   # Scripted / CI usage
 ```
 
-Without `--force` the subcommand stops when the git remote cannot be read (it tells you to pass `--force`), and exits successfully with a note when `apps/frappe` is already the KB fork. Both paths then do the same thing:
+An `apps/frappe` that holds a `.git` is converted only if it is a **clean stock `frappe/frappe` checkout**, checked offline: `.git` is a directory; every remote is GitHub `frappe/frappe` as `https://github.com/frappe/frappe`, `git@github.com:frappe/frappe` or `ssh://git@github.com/frappe/frappe` (host case-insensitive, `.git` suffix and trailing slash optional, path exact); no tracked change or untracked file; no stash; one worktree; no merge/rebase/cherry-pick in progress; exactly one local branch with an upstream and no local commit. Anything else (including a Git clone of the KB fork) is refused, **with or without `--force`**, before anything is touched; the converted stock tree is not kept (every commit is upstream). Without a `.git` of its own `apps/frappe` needs `--force` (kb cannot tell what it is). The download always asks for release line 1 (`major=1`). Then:
 
-1. Downloads the private `kb_frappe` tarball from the license server (`GET /download/kb_frappe`)
-2. Atomically replaces `apps/frappe` in-place — the directory remains named `frappe`
+1. Downloads the private `kb_frappe` tarball from the license server (`GET /download/kb_frappe?major=1`) and checks the source-identity headers (`X-KB-Repository`, `X-KB-Ref`, `X-KB-Commit`); a server that does not send them is refused before anything changes
+2. Replaces `apps/frappe` in-place — the directory remains named `frappe`
 3. Runs `bench setup requirements --python/--node frappe`, `pip install -e apps/frappe`, `bench build --app frappe`, and `bench migrate`
-4. Updates `sites/apps.json` with the new version
+4. Writes the receipt `.kb/apps/frappe.json` and updates `sites/apps.json` with the new version
 5. Restarts the dev server, or starts it again if replacing `apps/frappe` took it down (see [Install apps](#install-apps))
 
 After this completes the full 7-option menu is available on the next iteration. `kb_frappe` is a private fork of `frappe/frappe`; its Python package name and on-disk directory remain `frappe` — nothing in any installed app needs to change.
 
-> **Note:** This operation has no timeout — `bench build` and `bench migrate` on a fresh Frappe install can take 15+ minutes.
+> **Note:** The operation has a 90-minute ceiling (the download itself 10 minutes) — `bench build` and `bench migrate` on a fresh Frappe install can take 15+ minutes.
 
 ### Install apps
 
 Combines **Add apps to bench** and **Site-install apps** in one step. For each selected app, downloads the tarball, performs the full bench-side setup, then runs `bench install-app` on the active site. Apps already installed on the site are excluded from the picker; an app **already present in the bench** but not yet on the site stays in the list (marked *already downloaded — will install on site*) and skips straight to `bench install-app`, so **`kb install --apps <app>`** completes it instead of refusing it. Naming an app that is unknown, missing from your license, or already installed on the site still fails, now with a message saying which of the three it is.
+
+**Safety rules (every bench mutation).** `kb install|add|site-install|upgrade|manage|init-kb-frappe|adopt` first check that you run as the bench root's owner (not as root or another user), take a non-blocking bench lock (`.kb/lock`; a second `kb` fails at once and names the holder's PID) and resolve any interrupted earlier transaction (see [Bench state](#bench-state-lock-journal-receipts)). **Git checkouts are never replaced or deleted:** if any selected app directory holds a `.git` (a clone, or a linked-worktree `.git` file), `install`, `add`, `upgrade` and `manage` removal refuse the whole selection before touching anything. `kb site-install` is not Git-guarded.
 
 **Stock Frappe guard.** Refuses to run when `apps/frappe` is still the stock `frappe/frappe` repo — KB apps need the KB Frappe fork — and tells you to run **`kb init-kb-frappe`** first. The check happens before any download or bench change, and only a positive stock match blocks: an unreadable or unrecognised git remote does not. Pass **`--skip-frappe-check`** to run anyway.
 
@@ -121,9 +123,9 @@ Downloads app archives from the license server and performs the **full bench get
 4. **`bench setup requirements --node <app>`** — installs Node dependencies
 5. **`pip install -e apps/<app>`** — registers the app as an editable package in the bench venv (uv preferred, pip fallback)
 6. **`bench build --app <app>`** — compiles JS/CSS assets
-7. Updates **`sites/apps.json`** with the app version
+7. Writes the receipt **`.kb/apps/<app>.json`** and updates **`sites/apps.json`** with the app version (a failure here is no longer a warning: the journal stays pending and the next mutating command replays it)
 
-Downloads run **in parallel** (up to 3 at a time); steps 2–7 run sequentially per app after the parallel phase. When you pick **exactly one** app, **`kb`** asks for an optional **version or tag** (`?v=` on the license server: tag, branch, or commit). Multiple apps always use **latest**. From the shell: **`kb add --apps <one_app> --version <ref>`** (**`--version`** is ignored when more than one app is selected). Apps already present in the bench are excluded from the picker. Use **`kb site-install`** to install downloaded apps on a site.
+Downloads run **in parallel** (up to 3 at a time, into the OS temp directory); steps 1–7 then run **sequentially, one app at a time, in command-line order**, each as one journal transaction. Without a ref, **`kb`** asks the license server for the newest release on the app's release line (`?major=1`). When you pick **exactly one** app, **`kb`** asks for an optional **version or tag** (`?v=` on the license server: tag, branch, or commit). From the shell: **`kb add --apps <one_app> --version <ref>`**; **`--version`** with more than one app is refused before any download. Apps already present in the bench are excluded from the picker. Use **`kb site-install`** to install downloaded apps on a site.
 
 Like **`kb install`**, **`kb add`** refuses to run while `apps/frappe` is still stock `frappe/frappe` and points you at **`kb init-kb-frappe`**; **`--skip-frappe-check`** overrides that.
 
@@ -152,30 +154,52 @@ To install already-downloaded apps on a site, use **`kb site-install`** (or **Si
 
 ### Upgrade apps
 
-For each selected app already in the bench, **`kb`** downloads the **latest** release tarball from the license server (same `GET /download/{app}` flow as install) and runs the full upgrade sequence:
+For each selected app already in the bench, **`kb`** downloads the newest release on the app's release line from the license server (`GET /download/{app}?major=1`, same flow as install) and runs the full upgrade sequence:
 
-1. Atomically replaces the app directory
+1. Replaces the app directory (the previous source becomes `apps/<app>.kb-old`)
 2. **`bench setup requirements --python/--node <app>`** — refreshes Python and Node dependencies
 3. **`pip install -e apps/<app>`** — re-registers the editable package in the bench venv
 4. **`bench build --app <app>`** — recompiles JS/CSS assets
-5. Updates **`sites/apps.json`** with the new version (warning only on failure)
-6. **`bench migrate`** — applies any schema changes
+5. **`bench migrate`** — applies any schema changes
+6. Writes the receipt `.kb/apps/<app>.json` and the **`sites/apps.json`** entry, then retires the previous source (see below)
 
-Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails; a summary is printed at the end.
+Upgrades run **sequentially** (one app at a time). All apps are attempted even if one fails (but not after one leaves the journal pending); a summary is printed at the end.
 
-The previous app source is kept as `apps/<app>.kb-old` for the duration of the upgrade: if any step before `bench migrate` fails, the new directory is removed, the previous source is restored in place, `pip install -e` is re-run on it, and the error says the previous version was restored. If `bench migrate` itself fails nothing is rolled back (the schema may be half-applied) — `apps/<app>.kb-old` is kept and its path is printed in the error so you can recover the previous source manually.
+If any step before `bench migrate` fails, the new directory is removed, the previous source is restored in place, `pip install -e` is re-run on it, and the error says the previous version was restored. If `bench migrate` itself fails nothing is rolled back (the schema may be half-applied): `apps/<app>.kb-old` is kept, its path is printed, the journal stays at step `swapped`, and every mutating `kb` command refuses (naming `.kb/journal.json` and the old and new paths) until you recover by hand and delete the journal.
+
+**Leftovers are never deleted.** An existing `apps/<app>.kb-old` or `apps/<app>.kb-new` is moved to `.kb/recovery/legacy/<app>-<kb-old|kb-new>-<UTC>` before the swap. After a successful upgrade the previous source is deleted only if the app had a valid receipt; otherwise (installed before receipts existed, or a damaged receipt) it is kept at `.kb/recovery/<app>-pre-receipt-<UTC>` and listed by `kb status`. Deleting retained copies is your decision.
 
 ```bash
 kb upgrade                          # Interactive — pick from apps currently in bench
 kb upgrade --apps kb_pro,kb_compta  # Non-interactive upgrade
 kb upgrade --no-input --apps kb_pro # Scripted / CI usage
+kb upgrade --to kb_pro=v1.2.0       # Deploy exactly the published release v1.2.0 (repeatable)
 ```
+
+`--to <app>=<tag>` sends `?v=<tag>&release=1`: the server must confirm the tag is a published release (not a draft, prerelease, branch or bare commit) and say so in `X-KB-Release-Tag`, otherwise nothing changes. With `--to` and no `--apps`, only the `--to` apps are upgraded. A downgrade does not undo migrations.
 
 **`kb upgrade`** refuses to run while `apps/frappe` is still stock `frappe/frappe` (run **`kb init-kb-frappe`** first, or pass **`--skip-frappe-check`**) — the same guard as **`kb install`**, **`kb add`**, and **`kb site-install`**.
 
 Per-app timeout is **15 minutes** (download + extract + build + migrate). Use **`--verbose`** for more bench output.
 
 Replacing an app directory takes a running dev server down with it, so **`kb upgrade`** records whether one was running before the first download and — once at least one app has upgraded — restarts it, or starts it again if the upgrade killed it. See [Install apps](#install-apps) for the full rule.
+
+### Bench state: lock, journal, receipts
+
+`kb` keeps its own state under `<bench>/.kb/` (mode `0700`; files `0600`; every JSON file carries a `schema_version`, and a `kb` that meets a newer version refuses to change the bench):
+
+| Path | Meaning |
+|------|---------|
+| `.kb/lock` | The bench lock (`flock`). Never deleted; released by the kernel when the process exits or is killed. |
+| `.kb/journal.json` | The current or last transaction (`planned` → `downloaded` → `staged` → `swapped` → `migrated` (upgrade only) → `finalized`). `finalized` means nothing is pending. |
+| `.kb/apps/<dir>.json` | Receipt: repository, release line, resolved ref, full commit, release tag when verified, SHA-256 of the archive, provenance (`installed` or `adopted`). It is provenance, not a signature. |
+| `.kb/recovery/` | Copies kb keeps and never deletes (moved leftovers, pre-receipt copies). |
+
+An interrupted run is handled by the next mutating command: before the swap, only the paths the journal recorded are discarded; for `add`, `install` and `init-kb-frappe` an interrupted run is replayed and finalized; for `upgrade` an interruption before `bench migrate` finished is left to you. If a replay fails, every mutating command refuses and names the journal path.
+
+**`kb status`** is read-only (no lock, no network): bench root, per-app provenance (`installed`, `adopted`, `unknown`), receipt tag and commit, the journal step, retained copies with sizes, and the PID named in `.kb/lock`.
+
+**`kb adopt`** gives an archive bench installed before receipts existed its first receipt. For each installed app (and the framework) without a `.git` or a receipt it downloads the candidate release `v<version>` (version from the package or `sites/apps.json`, a hint only), compares the entire installed tree with it (file set, SHA-256, type, executable bit, symlink target; generated files such as `__pycache__/`, `*.egg-info/`, `node_modules/` that the release does not contain are ignored) and writes a receipt only on a unique full match. `--tag <app>=<tag>` (repeatable) names the release when the hint is missing or wrong; `--check` compares without the lock and creates nothing under the bench. It never changes `apps/`, sites or the database. Exit codes: `0` adopted or nothing to do, `2` mismatch (paths listed, never content), `3` ambiguous, `4` refused or stopped (Git checkout, licence/outage, unfinished journal). `kb_distri` is excluded for now.
 
 ### License
 
@@ -196,7 +220,7 @@ kb license                  # Print current license status (hits server to verif
 
 On most commands, the CLI loads the cached JWT and verifies the Ed25519 signature **offline** before continuing.
 
-A **blocking** `POST /heartbeat` (5-second timeout) runs before **`kb install`**, **`kb add`**, **`kb upgrade`**, and **`kb update`** when actually replacing the binary (not with **`kb update --check`**). **`kb site-install`** does not perform a heartbeat sync — it only checks the locally cached JWT (the app is already on disk). **`kb license`** also performs this sync check so the printed status reflects revocations and bans.
+Every request to the license server carries `X-KB-CLI-Version` (`dev` for a dev build). A **blocking** `POST /heartbeat` (5-second timeout) runs before **`kb install`**, **`kb add`**, **`kb upgrade`**, and **`kb update`** when actually replacing the binary (not with **`kb update --check`**). **`kb site-install`** does not perform a heartbeat sync — it only checks the locally cached JWT (the app is already on disk). **`kb license`** also performs this sync check so the printed status reflects revocations and bans.
 
 - **Server reachable** — revocations, contract expiry, and machine bans take effect immediately on those paths.
 - **Server unreachable** — the sync check is skipped silently and the cached JWT is used until it **expires** (tokens are issued with a **21-day** lifetime).
@@ -278,7 +302,9 @@ kb site-install            Install already-downloaded apps on this site via benc
 kb install  (alias: i)     Download and install apps on this site — combines kb add + kb site-install (--apps, optional --version when one app, --skip-frappe-check)
 kb init-kb-frappe          Replace stock apps/frappe with the licensed KB Frappe fork (--force)
 kb manage   (alias: m)     Interactive manage submenu (uninstall from site / remove from bench)
-kb upgrade  (alias: up)    Download latest release, rebuild assets, and migrate KB apps already in bench (--apps, --skip-frappe-check)
+kb upgrade  (alias: up)    Download the line's newest release, rebuild assets, and migrate KB apps already in bench (--apps, --to <app>=<tag>, --skip-frappe-check)
+kb status                  Read-only report: provenance, journal step, retained copies, lock holder
+kb adopt                   Match an archive bench against releases and write receipts (--tag <app>=<tag>, --check)
 kb activate (alias: a)     Activate this machine with a KB Pro license key
 kb license                 Show current license status (live server check)
 kb update   (alias: u)     Check GitHub and optionally replace the kb binary (see Self-update)
@@ -320,6 +346,8 @@ kb install      --no-input --apps kb_pro --version v1.4.0
 kb add          --no-input --apps kb_cheque
 kb site-install --no-input --apps kb_cheque
 kb upgrade      --no-input --apps kb_pro,kb_compta
+kb upgrade      --no-input --to kb_pro=v1.2.0
+kb adopt        --check
 kb init-kb-frappe --force --no-input
 kb activate <license-key>          # key as argument, no prompt
 kb update  --no-input --yes        # or just --no-input (implies --yes)
@@ -355,6 +383,7 @@ Installing a new binary with **`kb update`** (without **`--check`**) requires an
 make build    # → ./bin/kb (linux/amd64)
 make install  # install to $GOPATH/bin
 make test     # go test -race ./...
+make test-fault  # go test -race -tags kbfault ./... (crash-recovery tests that SIGKILL a child kb at named kill points)
 make vet      # go vet
 make fmt      # gofmt
 make tidy     # go mod tidy
