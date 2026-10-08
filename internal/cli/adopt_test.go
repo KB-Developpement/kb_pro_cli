@@ -405,6 +405,10 @@ func TestAdoptIgnoresGeneratedFilesButNotReleaseContent(t *testing.T) {
 	write(t, filepath.Join(app, "node_modules", "left-pad", "index.js"), "x")
 	write(t, filepath.Join(app, "kb_pro", "public", "dist", "app.js"), "x")
 	write(t, filepath.Join(app, ".DS_Store"), "x")
+	// bench build links <pkg>/public/node_modules to the app's node_modules
+	if err := os.Symlink("../../node_modules", filepath.Join(app, "kb_pro", "public", "node_modules")); err != nil {
+		t.Fatal(err)
+	}
 	if out, err := h.exec("adopt"); err != nil {
 		t.Fatalf("generated files made the tree unadoptable: %v\n%s", err, out)
 	}

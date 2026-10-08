@@ -26,6 +26,12 @@ func Excluded(rel string, isDir bool, pkg string) bool {
 			return true
 		}
 	}
+	// node_modules is excluded whatever its type: bench build links
+	// <pkg>/public/node_modules to the app's node_modules, and that symlink is
+	// build output just like the directory it points at.
+	if comps[len(comps)-1] == "node_modules" {
+		return true
+	}
 	if !isDir {
 		base := comps[len(comps)-1]
 		if base == ".DS_Store" || strings.HasSuffix(base, ".pyc") {

@@ -163,6 +163,7 @@ func TestExclusions(t *testing.T) {
 		{"kb_pro/a.pyc", false, true},
 		{"node_modules", true, true},
 		{"kb_pro/public/node_modules/x/y.js", false, true},
+		{"kb_pro/public/node_modules", false, true}, // bench build's symlink to ../../node_modules
 		{"kb_pro/public/dist", true, true},
 		{"kb_pro/public/dist/app.js", false, true},
 		{"kb_pro/public/js/app.js", false, false},
