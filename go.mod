@@ -10,6 +10,7 @@ require (
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/mattn/go-isatty v0.0.20
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.20.0
 )

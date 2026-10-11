@@ -615,6 +615,10 @@ func applyDownloads(ctx context.Context, command string, dlResults []dlResult, p
 
 		if applyErr != nil {
 			errlog.Logf("%s %s: %v", command, name, applyErr)
+			if res.Output != "" {
+				errlog.Logf("%s %s output:\n%s", command, name, res.Output)
+				fmt.Fprintln(os.Stdout, ui.Dim.Render(res.Output))
+			}
 			fmt.Fprintf(os.Stdout, "%s %s: %v\n", ui.Failure.Render("✗"), ui.AppName.Render(name), applyErr)
 			if errors.Is(applyErr, bench.ErrJournalPending) {
 				stopped = true

@@ -264,6 +264,10 @@ func applyWithSteps(root string, p ApplyPlan, st Steps) (ApplyResult, error) {
 		_ = os.RemoveAll(stagingDir)
 		return res, abort(fmt.Errorf("extract archive: %w", err))
 	}
+	if err := validateArchiveIdentity(stagingDir, dir, pkg); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return res, abort(err)
+	}
 	n, err := kbstate.CountEntries(stagingDir, pkg)
 	if err != nil {
 		_ = os.RemoveAll(stagingDir)
