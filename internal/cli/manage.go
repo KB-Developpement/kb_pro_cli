@@ -32,7 +32,7 @@ func newManageCmd() *cobra.Command {
 		Long: `Interactively manage KB apps in the bench.
 
   Uninstall  — bench --site <site> uninstall-app <app> -y  (removes from site, keeps source)
-  Remove     — uninstall if needed, then bench remove-app <app>  (deletes source)
+  Remove     — uninstall if needed, then bench remove-app <app>  (moves source to archived/apps)
 
 To install already-downloaded apps on a site, use: kb site-install`,
 		SilenceUsage: true,

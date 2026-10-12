@@ -148,7 +148,7 @@ Select one of two actions:
 | Action | What it does |
 |--------|-------------|
 | Uninstall from site | `bench uninstall-app` — removes from site, source stays in bench |
-| Remove from bench | `bench remove-app` — uninstalls from site if needed, then deletes source folder |
+| Remove from bench | `bench remove-app` — uninstalls from site if needed, then moves the source folder to `archived/apps/` (Bench 5.31.0 default) |
 
 To install already-downloaded apps on a site, use **`kb site-install`** (or **Site-install apps** in the main menu).
 

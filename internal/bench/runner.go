@@ -29,7 +29,8 @@ func UninstallApp(ctx context.Context, site, appName string, force bool) (string
 }
 
 // RemoveApp runs "bench remove-app <appName>".
-// This deletes the app source from the bench apps folder entirely.
+// Bench 5.31.0 moves the app source to the bench's archived/apps folder unless
+// --no-backup is given; this call passes no flags, so the source is archived.
 func RemoveApp(ctx context.Context, appName string) (string, error) {
 	return runBench(ctx, "remove-app", appName)
 }

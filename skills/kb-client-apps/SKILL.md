@@ -162,7 +162,8 @@ line is pinned, so a published 2.x (v16) release does not become "latest" for it
 
 `kb manage` → "Uninstall from site" runs `bench --site <site> uninstall-app <app>`
 (asks for confirmation; source stays). "Remove from bench" uninstalls from the site if
-needed, then `bench remove-app <app>` (an app directory holding a `.git` is refused
+needed, then `bench remove-app <app>`, which on Bench 5.31.0 moves the source to
+`archived/apps/` (an app directory holding a `.git` is refused
 before the first uninstall, for the whole selection). Interactive only. Data of an uninstalled app is
 deleted by Frappe — back up first. After uninstalling a licensed app the fork stops
 requiring it in the license.
