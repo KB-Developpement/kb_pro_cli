@@ -60,7 +60,7 @@ func newUpgradeCmd() *cobra.Command {
 		Use:     "upgrade",
 		Aliases: []string{"up"},
 		Short:   "Update KB apps already present in the bench",
-		Long: `Download the latest release on each app's line for selected KB apps and migrate all sites.
+		Long: `Download the latest release on each app's line for selected KB apps and run Bench's migration.
 
 Each app is fetched from the license server using your active license and then
 extracted over the existing app directory. "bench migrate" is run afterwards
@@ -220,7 +220,8 @@ func doUpgrade(ctx context.Context, preselected []string, pins []upgradePin) err
 		var res bench.ApplyResult
 		var opErr error
 
-		// Each upgrade has its own 15-minute budget covering download + extract + migrate.
+		// Download and preparation share 15 minutes. Migration starts a fresh
+		// 10-minute step budget under the original caller context.
 		opCtx, opCancel := context.WithTimeout(ctx, 15*time.Minute)
 		if spinErr := runWithSpinner(fmt.Sprintf("Upgrading %s…", ui.AppName.Render(name)), func() {
 			var dl *license.Download
@@ -229,7 +230,7 @@ func doUpgrade(ctx context.Context, preselected []string, pins []upgradePin) err
 				return
 			}
 			defer os.Remove(dl.Path)
-			res, opErr = bench.ApplyArchive(opCtx, bench.ApplyPlan{Command: bench.CmdUpgrade, App: app, Download: dl})
+			res, opErr = bench.ApplyArchive(opCtx, ctx, bench.ApplyPlan{Command: bench.CmdUpgrade, App: app, Download: dl})
 		}); spinErr != nil {
 			opErr = spinErr
 		}

@@ -99,10 +99,12 @@ parallel but site installs run in the listed order — list `kb_pro` first.
 
 ## Upgrade — what actually runs, and how it fails
 
-`kb upgrade --apps kb_pro,kb_compta` processes apps one by one, 15 minutes each:
+`kb upgrade --apps kb_pro,kb_compta` processes apps one by one. Download and preparation share 15 minutes;
+migration starts its own 10-minute step budget, still limited by caller
+cancellation or an earlier caller deadline:
 download the newest release on the app's line → extract to `apps/<app>.kb-new` →
 **rename the current tree to `apps/<app>.kb-old`** → swap the new tree in →
-requirements → `pip install -e` → `bench build --app` → `bench migrate` (whole bench) →
+requirements → `pip install -e` → `bench build --app` → `bench migrate` (native Bench site selection) →
 receipt + `apps.json` → retire `.kb-old`: deleted if the app had a valid receipt, else
 moved to `.kb/recovery/<app>-pre-receipt-<UTC>` (it may hold hand edits; `kb status`
 lists it with its size; deleting it is your decision). A leftover `.kb-old`/`.kb-new`

@@ -80,19 +80,23 @@ type Steps struct {
 	SyncAppState      func() error
 }
 
-func defaultSteps(ctx context.Context, root string, app apps.App, command string) Steps {
+func defaultSteps(ctx, migrateCtx context.Context, root string, app apps.App, command string) Steps {
 	dir, pkg := app.Dir(), app.PackageName()
-	step := func(f func(context.Context) (string, error)) func() (string, error) {
+	step := func(parent context.Context, f func(context.Context) (string, error)) func() (string, error) {
 		return func() (string, error) {
-			c, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			c, cancel := context.WithTimeout(parent, 10*time.Minute)
 			defer cancel()
-			return f(c)
+			out, err := f(c)
+			if err != nil && c.Err() != nil {
+				err = fmt.Errorf("%w: %w", c.Err(), err)
+			}
+			return out, err
 		}
 	}
 	s := Steps{
-		SetupRequirements: step(func(c context.Context) (string, error) { return setupRequirementsPythonAndNode(c, pkg) }),
-		PipInstall:        step(func(c context.Context) (string, error) { return PipInstallEditable(c, dir) }),
-		Build:             step(func(c context.Context) (string, error) { return BuildApp(c, pkg) }),
+		SetupRequirements: step(ctx, func(c context.Context) (string, error) { return setupRequirementsPythonAndNode(c, pkg) }),
+		PipInstall:        step(ctx, func(c context.Context) (string, error) { return PipInstallEditable(c, dir) }),
+		Build:             step(ctx, func(c context.Context) (string, error) { return BuildApp(c, pkg) }),
 		SyncAppState:      func() error { return SyncAppState(dir, pkg) },
 	}
 	if command == CmdAdd || command == CmdInstall {
@@ -100,7 +104,7 @@ func defaultSteps(ctx context.Context, root string, app apps.App, command string
 		s.RemoveAppsTxt = func() error { return removeAppFromAppsTxt(root, pkg) }
 	}
 	if command == CmdUpgrade || command == CmdInitFrappe {
-		s.Migrate = step(func(c context.Context) (string, error) { return runBench(c, "migrate") })
+		s.Migrate = step(migrateCtx, func(c context.Context) (string, error) { return runBench(c, "migrate") })
 	}
 	return s
 }
@@ -110,12 +114,16 @@ func defaultSteps(ctx context.Context, root string, app apps.App, command string
 // migrate), then finalized (receipt and apps.json). The caller holds the bench
 // lock, has recovered any earlier journal, and has already run its preflight.
 //
+// ctx bounds preparation; migrateCtx is its caller context, so migration gets
+// a fresh step budget while preserving caller cancellation. Callers that do not
+// separate these phases pass the same context twice.
+//
 // Nothing here deletes a leftover: .kb-old and .kb-new copies are moved to
 // .kb/recovery/legacy, and the replaced tree is deleted only when the app had a
 // valid receipt (or is the stock-Frappe conversion).
-func ApplyArchive(ctx context.Context, p ApplyPlan) (ApplyResult, error) {
+func ApplyArchive(ctx, migrateCtx context.Context, p ApplyPlan) (ApplyResult, error) {
 	root := benchDir()
-	return applyWithSteps(root, p, defaultSteps(ctx, root, p.App, p.Command))
+	return applyWithSteps(root, p, defaultSteps(ctx, migrateCtx, root, p.App, p.Command))
 }
 
 func newPendingReceipt(app apps.App, dl *license.Download) *kbstate.Receipt {
@@ -361,12 +369,12 @@ func applyWithSteps(root string, p ApplyPlan, st Steps) (ApplyResult, error) {
 		if err != nil {
 			// Do not roll back: the schema may be half-migrated. The journal
 			// stays at swapped and the old source stays where it is.
-			msg := fmt.Sprintf("bench migrate: %v (app files were replaced and NOT rolled back", err)
+			msg := "(app files were replaced and NOT rolled back"
 			if hadOld {
 				msg += fmt.Sprintf("; the previous source is kept at %s", oldDir)
 			}
 			msg += fmt.Sprintf("; the journal %s stays pending at step swapped)", kbstate.JournalPath(root))
-			return res, &PendingError{Journal: kbstate.JournalPath(root), Cause: errors.New(msg)}
+			return res, &PendingError{Journal: kbstate.JournalPath(root), Cause: fmt.Errorf("bench migrate: %w %s", err, msg)}
 		}
 		if p.Command == CmdUpgrade {
 			if err := j.Advance(kbstate.StepMigrated); err != nil {
@@ -551,7 +559,7 @@ func RecoverJournal(ctx context.Context, mode RecoverMode) (notes []string, err 
 		return nil, pendingRefusal(root, j, "unknown command")
 	}
 
-	st := defaultSteps(ctx, root, app, j.Command)
+	st := defaultSteps(ctx, ctx, root, app, j.Command)
 	if j.Step == kbstate.StepSwapped {
 		// The move-in, registration or build may be incomplete: check that the
 		// live tree is the one that was staged, then redo the idempotent steps.
