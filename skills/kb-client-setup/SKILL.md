@@ -95,7 +95,7 @@ chmod 600 ~/.config/kb/config.json
 ## Step 3 — activate
 
 ```sh
-kb activate <license-key>     # or run `kb activate` and paste it at the masked prompt
+kb activate                  # saved key, or paste at the masked terminal prompt
 kb license                    # confirm: "License active", client, tier, token date, apps
 ```
 
@@ -106,8 +106,13 @@ POSTs key + fingerprint to `/activate`, and stores the 21-day token in
 fork reads). The key is saved to `~/.config/kb/license_key`, so later `kb activate`
 needs no argument.
 
-Prefer the masked prompt over passing the key on the command line when other people
-share the machine: an argument lands in shell history and is visible in `ps`.
+Positional keys are refused. Use `kb activate --prompt` to replace a saved key.
+For automation use `kb activate --key-file /run/secrets/kb-license-key --no-input`
+with a regular private file (for example mode 0600), or
+`kb activate --key-file - --no-input < /run/secrets/kb-license-key`.
+The explicit source overrides the saved key and never falls back on failure.
+`--key-file -` requires redirected stdin; interactive entry uses the masked prompt.
+Never put a literal key in shell commands or environment variables.
 
 Each installation (each `~/.config/kb/machine-id`) consumes **one activation seat** on
 the key. Recreating a container or deleting `~/.config/kb` creates a new identity and a

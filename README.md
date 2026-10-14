@@ -212,9 +212,25 @@ From the main menu, **License** opens a submenu where you can:
 Equivalent shell commands:
 
 ```bash
-kb activate [license-key]   # Activate; optional key argument skips the prompt
+kb activate                 # Saved key, or masked prompt on a terminal
+kb activate --prompt        # Enter a different key, ignoring the saved key
+kb activate --key-file /run/secrets/kb-license-key --no-input
 kb license                  # Print current license status (hits server to verify)
 ```
+
+Positional keys (`kb activate KEY`) are no longer accepted. Update scripts to
+use `--key-file <path>` with a regular file readable only by its owner (for
+example mode `0600`), or `--key-file -` with redirected stdin:
+
+```sh
+kb activate --key-file - --no-input < /run/secrets/kb-license-key
+```
+
+A supplied file or stdin source takes precedence over the saved key; invalid
+input never falls back to it. `--prompt` and `--key-file` are mutually exclusive.
+With no explicit source, the saved key is reused, or a terminal is required for
+the masked prompt. Do not put a literal key in shell commands or environment
+variables. Activation-limit errors use a key placeholder, not the stored key.
 
 #### License enforcement
 
@@ -246,7 +262,7 @@ What this means in practice:
 | `config.json` | Persistent settings (mode `0600`) — see fields below. |
 | `license.json` | Cached JWT and last-check timestamp (written by activation / heartbeat). |
 | `license.jwt` | Raw JWT mirrored for the Frappe app. |
-| `license_key` | Stored license key (written on first successful activation). |
+| `license_key` | Stored license key (0600; replaced only after successful activation). |
 | `machine-id` | Random 128-bit id identifying this installation (mode `0600`, created once, never rewritten). Deleting it changes the fingerprint and costs an activation seat. |
 | `previous-fingerprint` | Fingerprint of the activation superseded when this installation's identity changed; only used to print the `kbls remove-activation` hint. Cleared on the next successful activation. |
 | `error.log` | Timestamped log of every error shown to the user (mode `0600`, capped at ~512 KB). |
@@ -349,7 +365,7 @@ kb upgrade      --no-input --apps kb_pro,kb_compta
 kb upgrade      --no-input --to kb_pro=v1.2.0
 kb adopt        --check
 kb init-kb-frappe --force --no-input
-kb activate <license-key>          # key as argument, no prompt
+kb activate --key-file /run/secrets/kb-license-key --no-input
 kb update  --no-input --yes        # or just --no-input (implies --yes)
 ```
 

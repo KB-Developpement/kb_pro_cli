@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,14 +84,26 @@ func ClearLocalLicense() {
 	ClearPreviousFingerprint()
 }
 
+// MaxLicenseKeyBytes bounds local license key input and storage reads.
+const MaxLicenseKeyBytes = 4096
+
 // LoadLicenseKey reads the stored license key from ~/.config/kb/license_key.
-// Returns empty string if not found.
+// Returns an empty string if missing, unreadable or larger than the input limit.
 func LoadLicenseKey() string {
-	data, err := os.ReadFile(keyPath())
+	f, err := os.Open(keyPath())
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, MaxLicenseKeyBytes+3))
+	if err != nil || len(data) > MaxLicenseKeyBytes+2 {
+		return ""
+	}
+	key := strings.TrimSpace(string(data))
+	if len(key) > MaxLicenseKeyBytes {
+		return ""
+	}
+	return key
 }
 
 // SaveLicenseKey writes the license key to ~/.config/kb/license_key with 0600 permissions.
@@ -99,7 +112,7 @@ func SaveLicenseKey(key string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	if err := os.WriteFile(keyPath(), []byte(key+"\n"), 0600); err != nil {
+	if err := fsutil.WriteFileAtomic(keyPath(), []byte(key+"\n"), 0600); err != nil {
 		return fmt.Errorf("write license key: %w", err)
 	}
 	return nil

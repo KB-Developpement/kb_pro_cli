@@ -51,7 +51,7 @@ func runLicenseMenu() {
 			pause()
 
 		case licMenuActivate:
-			if err := runActivate(nil); err != nil {
+			if err := runActivate("", false, os.Stdin); err != nil {
 				errlog.Log(err)
 				fmt.Fprintf(os.Stderr, "\n%s %v\n", ui.Failure.Render("Error:"), err)
 			}

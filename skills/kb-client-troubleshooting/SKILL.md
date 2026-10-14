@@ -121,5 +121,6 @@ that the server issued a token it cannot verify (key rotation in progress).
   cannot choose the v16 (2.x) line.
 - The fork's daily refresh needs the site scheduler; on ffm prod the scheduler runs in
   its own container and may not see `~/.config/kb` (unverified).
-- `kb activate <key>` puts the key in shell history; prefer the prompt.
+- Positional activation keys are refused. Use `kb activate --prompt` or
+  `kb activate --key-file <path> --no-input`; `--key-file -` reads redirected stdin.
 - `http://` license server URLs are accepted without warning — always use https.

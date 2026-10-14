@@ -64,15 +64,15 @@ gate on that site entirely — for KB-internal sites only; never set it on a cus
 
 | `kb` warning / fork message | Cause | Fix |
 |---|---|---|
-| `license has been revoked — contact KB-Developpement` | Key revoked on server | Server: `kbls unrevoke-key --key …` if wrong, or issue a new key; client: `kb activate <new key>` |
+| `license has been revoked — contact KB-Developpement` | Key revoked on server | Server: `kbls unrevoke-key --key …` if wrong, or issue a new key; client: `kb activate --prompt` |
 | `this machine has been banned — contact KB-Developpement` | Fingerprint on the ban list | Server: `kbls unban-machine --fingerprint …` if wrong; then `kb activate` |
 | `support contract has expired — contact KB-Developpement to renew` | `contract_end` passed (midnight UTC of the end date) | Server: `kbls edit-client --id … --end YYYY-MM-DD`; client: `kb activate` (key is saved, no argument needed) |
 | `activation not found on server — run: kb activate` | Activation row removed, key deleted, or client deleted | `kb activate` (uses a seat); if the key/client was deleted, a new key is needed |
 | `machine fingerprint changed — run: kb activate` | Token bound to another identity (copied `~/.config/kb`, `/etc/machine-id` or CPU changed, `machine-id` file lost) | `kb activate`; release the old seat on the server if the key is full |
-| `this machine's identity changed (kb now identifies each installation separately) — run: kb activate` | First run after upgrading from kb ≤0.7.x | `kb activate`; on `activation limit reached` follow the printed `kbls remove-activation` command |
+| `this machine's identity changed (kb now identifies each installation separately) — run: kb activate` | First run after upgrading from kb ≤0.7.x | `kb activate`; on `activation limit reached` follow the printed `kbls remove-activation` template (its key is a placeholder) |
 | `activation limit reached — contact KB-Developpement to add more machines` (+ hint with `kbls remove-activation --key … --fingerprint …`) | Key's `max_activations` used by other identities | Server: release the stale one (`kbls list-activations --key …`, `kbls remove-activation …`) or `kbls edit-key --max-activations N` |
 | `invalid license key` | Key unknown (typo, deleted) | Check the key; server `kbls list-keys --client …` |
-| `activation denied: <code>` / `license server returned HTTP <n>` | Unexpected server answer (e.g. 429 `rate_limited`, 5xx, proxy page) | Retry after a minute; `curl -s https://license.kbdev.co/health` |
+| `activation denied by license server — contact KB-Developpement` / `license server returned HTTP <n>` | Unexpected server answer (e.g. 429 `rate_limited`, 5xx, proxy page) | Retry after a minute; `curl -s https://license.kbdev.co/health` |
 
 Fork messages at login (title "KB License"):
 
@@ -148,8 +148,15 @@ activation and ban list.
 seat stays used until removed there. There is no `kb deactivate` command. The site
 starts refusing logins as soon as `license.jwt` is gone.
 
-**Activate a scripted / CI bench**: `kb activate <key>` (argument), with
-`KB_LICENSE_SERVER` or `config.json` present.
+**Activate a scripted / CI bench**: use
+`kb activate --key-file /run/secrets/kb-license-key --no-input`, with a regular
+private key file (for example mode 0600). Alternatively redirect a secret file:
+`kb activate --key-file - --no-input < /run/secrets/kb-license-key`.
+Positional keys are refused. An explicit input overrides the saved key and never
+falls back on failure; `kb activate --prompt` replaces a saved key interactively.
+Activation-limit errors show a key placeholder so no key is written to error.log.
+Use `KB_LICENSE_SERVER` or the built-in server URL; config.json is optional for
+activation.
 
 ## What is enforced where (know the limits)
 
