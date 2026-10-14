@@ -36,22 +36,24 @@ type AdoptInfo struct {
 // from. It is provenance, not a signature, and it lives outside the replaceable
 // app directory.
 type Receipt struct {
-	SchemaVersion int        `json:"schema_version"`
-	App           string     `json:"app"`
-	Directory     string     `json:"directory"`
-	Package       string     `json:"package"`
-	Repository    string     `json:"repository"`
-	Line          string     `json:"line"`
-	Requested     string     `json:"requested"`
-	Ref           string     `json:"ref"`
-	Commit        string     `json:"commit"`
-	ReleaseTag    *string    `json:"release_tag"`
-	ArchiveSHA256 string     `json:"archive_sha256"`
-	InstalledAt   string     `json:"installed_at"`
-	State         string     `json:"state"`
-	SessionID     *string    `json:"session_id"`
-	Provenance    string     `json:"provenance"`
-	Adopt         *AdoptInfo `json:"adopt,omitempty"`
+	SchemaVersion  int        `json:"schema_version"`
+	App            string     `json:"app"`
+	Directory      string     `json:"directory"`
+	Package        string     `json:"package"`
+	Repository     string     `json:"repository"`
+	Line           string     `json:"line"`
+	Requested      string     `json:"requested"`
+	Ref            string     `json:"ref"`
+	Commit         string     `json:"commit"`
+	ReleaseTag     *string    `json:"release_tag"`
+	ArchiveSHA256  string     `json:"archive_sha256"`
+	InstalledAt    string     `json:"installed_at"`
+	State          string     `json:"state"`
+	SessionID      *string    `json:"session_id"`
+	Provenance     string     `json:"provenance"`
+	Adopt          *AdoptInfo `json:"adopt,omitempty"`
+	Protected      []string   `json:"protected,omitempty"`
+	ProtectionRefs []string   `json:"protection_refs,omitempty"`
 }
 
 // Tag is the release tag when verified, else the resolved ref.

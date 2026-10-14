@@ -65,6 +65,10 @@ func runLicenseMenu() {
 }
 
 func runLicenseDeactivate() {
+	if err := ordinaryMaintenanceGate(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
+	}
 	state := license.CurrentState()
 	hasKey := license.LoadLicenseKey() != ""
 	if state == nil && !hasKey {

@@ -56,6 +56,7 @@ func runStatus(w io.Writer) error {
 		return fmt.Errorf("bench directory %q is not accessible (set KB_BENCH_ROOT to your Frappe bench root)", root)
 	}
 	fmt.Fprintf(w, "Bench: %s\n", root)
+	printMaintenanceStatus(w, root)
 
 	// Lock: read the PID line only; probing the lock would take it.
 	if pid, ok := kbstate.HolderPID(root); ok {

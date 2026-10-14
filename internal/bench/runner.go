@@ -38,7 +38,10 @@ func RemoveApp(ctx context.Context, appName string) (string, error) {
 // PipInstallEditable registers the app as an editable Python package in the bench venv,
 // mirroring bench's own install_app() logic (uv preferred, pip fallback).
 func PipInstallEditable(ctx context.Context, appDirName string) (string, error) {
-	root := benchDir()
+	return pipInstallEditableAt(ctx, benchDir(), appDirName)
+}
+
+func pipInstallEditableAt(ctx context.Context, root, appDirName string) (string, error) {
 	appPath := filepath.Join(root, "apps", appDirName)
 	python := filepath.Join(root, "env", "bin", "python")
 
@@ -76,8 +79,9 @@ type appStateEntry struct {
 // existing entries (which may contain nested objects, ints, or bools) are
 // preserved exactly — a typed struct unmarshal would fail on mixed types and
 // silently wipe the whole file on the next write.
-func SyncAppState(dir, appName string) error {
-	root := benchDir()
+func SyncAppState(dir, appName string) error { return syncAppStateAt(benchDir(), dir, appName) }
+
+func syncAppStateAt(root, dir, appName string) error {
 	path := filepath.Join(root, "sites", "apps.json")
 
 	// Preserve all existing entries verbatim regardless of their Go types.

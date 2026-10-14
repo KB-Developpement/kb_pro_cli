@@ -293,18 +293,18 @@ func TestManageRemoveDeletesTheReceipt(t *testing.T) {
 	}
 }
 
-func TestNoMaintenanceCommandInPhase0(t *testing.T) {
+func TestMaintenanceCommandAvailableInPhase2(t *testing.T) {
 	h := newBenchH(t)
 	_, err := h.exec("maintenance")
-	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+	if err != nil {
 		t.Fatalf("kb maintenance: %v", err)
 	}
 	out, err := h.exec("--help")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(strings.ToLower(out), "maintenance") {
-		t.Errorf("--help lists a maintenance entry:\n%s", out)
+	if !strings.Contains(strings.ToLower(out), "maintenance") {
+		t.Errorf("--help lacks maintenance:\n%s", out)
 	}
 	for _, want := range []string{"status", "adopt", "upgrade"} {
 		if !strings.Contains(out, want) {

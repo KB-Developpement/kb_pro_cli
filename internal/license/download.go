@@ -70,11 +70,12 @@ func (e *CompatError) Error() string {
 // v=<Ref> (plus release=1 when Release) if Ref is set, otherwise
 // major=<Line>.
 type DownloadRequest struct {
-	App        string // license identifier, the /download/{app} path segment
-	Repository string // registry repository name, e.g. "kb_pro"
-	Line       int    // registry line; must be >= 1 unless Ref is set
-	Ref        string // explicit tag/branch/commit (--version, --to, adopt candidates)
-	Release    bool   // strict: require a published release; only with Ref
+	App               string // license identifier, the /download/{app} path segment
+	Repository        string // registry repository name, e.g. "kb_pro"
+	Line              int    // registry line; must be >= 1 unless Ref is set
+	Ref               string // explicit tag/branch/commit (--version, --to, adopt candidates)
+	Release           bool   // strict: require a published release; only with Ref
+	SessionCredential string // session secret for maintenance-gated downloads
 }
 
 // Download is a verified archive on disk plus the identity the server stated.
@@ -123,7 +124,7 @@ func newDownloadClient() *http.Client {
 	tr.ResponseHeaderTimeout = ResponseHeaderTimeout
 	tr.TLSHandshakeTimeout = DialTimeout
 	tr.DisableKeepAlives = true
-	return &http.Client{Transport: tr}
+	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
 // DownloadApp downloads one archive from the license server into a temporary
@@ -148,6 +149,9 @@ func DownloadApp(ctx context.Context, serverURL, token string, req DownloadReque
 		return nil, fmt.Errorf("build download request: %w", err)
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+token)
+	if req.SessionCredential != "" {
+		httpReq.Header.Set(maintenanceCredentialHeader, req.SessionCredential)
+	}
 	httpReq.Header.Set(CLIVersionHeader, version.Version)
 
 	client := newDownloadClient()

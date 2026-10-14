@@ -77,6 +77,11 @@ var githubHTTPClient = resty.New().
 var githubDownloadClient = resty.New().SetTimeout(5 * time.Minute)
 
 func runUpdate(ctx context.Context, checkOnly, yes bool) error {
+	if !checkOnly {
+		if err := ordinaryMaintenanceGate(); err != nil {
+			return err
+		}
+	}
 	current := version.Version
 
 	// License gate: downloading a new binary requires an active license.

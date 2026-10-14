@@ -129,6 +129,7 @@ func (s *dlServer) handle(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	if r.URL.Path == "/releases/latest" {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"tag_name":"v0.0.1","assets":[]}`))
 		return
 	}

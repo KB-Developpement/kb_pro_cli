@@ -61,6 +61,9 @@ To install already-downloaded apps on a site, use: kb site-install`,
 // runManage shows a looping submenu for destructive app management.
 // Esc / Ctrl+C exits the loop and returns nil.
 func runManage(ctx context.Context, site string, force bool) error {
+	if err := ordinaryMaintenanceGate(); err != nil {
+		return err
+	}
 	for {
 		clearScreen()
 

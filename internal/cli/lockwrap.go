@@ -21,6 +21,9 @@ import (
 // resolved refuses here, naming the journal path.
 func runLocked(ctx context.Context, fn func() error) error {
 	root := bench.Root()
+	if err := kbstate.MaintenanceGate(root); err != nil {
+		return err
+	}
 	if err := kbstate.CheckBenchOwner(root); err != nil {
 		return err
 	}
@@ -29,6 +32,9 @@ func runLocked(ctx context.Context, fn func() error) error {
 		return err
 	}
 	defer lock.Release()
+	if err := kbstate.MaintenanceGate(root); err != nil {
+		return err
+	}
 	if err := kbstate.CheckSchemas(root); err != nil {
 		return err
 	}

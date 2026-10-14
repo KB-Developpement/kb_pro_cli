@@ -48,6 +48,9 @@ or manage apps from the KB-Developpement GitHub organisation.`,
 	root.PersistentFlags().BoolVar(&globalFlags.NoColor, "no-color", false, "Disable colours in output (also honoured via NO_COLOR env var)")
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		if err := maintenanceCommandGate(cmd); err != nil {
+			return err
+		}
 		if globalFlags.NoColor {
 			ui.DisableColors()
 		}
@@ -71,6 +74,7 @@ or manage apps from the KB-Developpement GitHub organisation.`,
 	root.AddCommand(newManageCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newAdoptCmd())
+	root.AddCommand(newMaintenanceCmd())
 	root.AddCommand(newActivateCmd())
 	root.AddCommand(newLicenseCmd())
 	root.AddCommand(newCompletionCmd())
@@ -88,6 +92,9 @@ func newInitCmd() *cobra.Command {
 		},
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := ordinaryMaintenanceGate(); err != nil {
+				return err
+			}
 			if globalFlags.NoInput {
 				return fmt.Errorf("kb init cannot run with --no-input")
 			}
@@ -107,6 +114,9 @@ func newConfigCmd() *cobra.Command {
 		},
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := ordinaryMaintenanceGate(); err != nil {
+				return err
+			}
 			if globalFlags.NoInput {
 				return fmt.Errorf("kb config cannot run with --no-input")
 			}

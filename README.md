@@ -201,6 +201,13 @@ An interrupted run is handled by the next mutating command: before the swap, onl
 
 **`kb adopt`** gives an archive bench installed before receipts existed its first receipt. For each installed app (and the framework) without a `.git` or a receipt it downloads the candidate release `v<version>` (version from the package or `sites/apps.json`, a hint only), compares the entire installed tree with it (file set, SHA-256, type, executable bit, symlink target; generated files such as `__pycache__/`, `*.egg-info/`, `node_modules/` that the release does not contain are ignored) and writes a receipt only on a unique full match. `--tag <app>=<tag>` (repeatable) names the release when the hint is missing or wrong; `--check` compares without the lock and creates nothing under the bench. It never changes `apps/`, sites or the database. Exit codes: `0` adopted or nothing to do, `2` mismatch (paths listed, never content), `3` ambiguous, `4` refused or stopped (Git checkout, licence/outage, unfinished journal). `kb_distri` is excluded for now.
 
+### Maintenance
+
+Single-app maintenance commands are implemented on the Phase 2 development
+branch. They remain gated on review, the disposable two-site workflow trial and
+maintainer sign-off before customer use. See [the maintenance guide](docs/MAINTENANCE.md)
+for approval, native Git, reporting, release exit and recovery behavior.
+
 ### License
 
 From the main menu, **License** opens a submenu where you can:
