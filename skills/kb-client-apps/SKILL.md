@@ -53,6 +53,44 @@ errors see `kb-client-license`; for symptoms without an obvious cause see
   timeout). A server rejection stops the command and clears the local token; a network
   failure is ignored and the cached token is used.
 
+## Maintenance support (candidate under review)
+
+The reviewed maintenance candidate is committed with feature sign-off and a draft
+PR, but remains unreleased. The native two-site main workflow and outage drill
+passed; isolated expiry/contract, attach-interruption and lost-redeem/admin recovery
+drills remain deferred and unpassed. Customer release and rollout approval remain
+gated on those checks; treat this as internal trial guidance. Before any authorized trial, read
+[`docs/MAINTENANCE.md`](../../docs/MAINTENANCE.md). Read
+[`docs/MAINTENANCE_TRIAL_SERVER.md`](../../docs/MAINTENANCE_TRIAL_SERVER.md) only when
+running its isolated-server expiry drill.
+
+Phase 2 covers one READY line-1 `kb_compta` or `kb_stock` app. It does not support
+multi-app sessions, `--all`, framework maintenance or squash-merge reconciliation. Use
+the bench owner account. `maintenance enter` needs an interactive TTY because it reads
+the approval code at a no-echo prompt; run it through `ffm shell <bench>`, not
+`ffm shell <bench> --exec`. Entry backs up every site's database and public/private files and
+records each site's Patch Log before source changes. It does not migrate or restart
+services.
+
+Native Git uses the host's credential helper or SSH agent; it does not use the license
+server's PAT. Check that the canonical product-repository URL matches the native Git
+credential-helper entry before pushing, and keep credentials out of remote URLs. Finish
+requires clean source and every protected commit reachable from a current branch in the
+same remote repository; preserve commit ancestry and do not squash. Report retries reuse
+the exact saved sequence and payload; after 30 minutes without acknowledgement, status
+is stale and unknown. Exit takes fresh per-site backups and migrates only sites with
+the selected app; retain each site's migration outcome and both source sets for recovery.
+Never clear a protected session, its Git history or the journal to unblock ordinary
+mutations. A lost redeem response can only be reset after the server confirms the
+unentered request is closed and every condition in the maintenance guide is met. Site
+backups and source recovery are distinct; a raw bench/source copy is not a database
+rollback.
+
+After a verified release exit, allow queued fixture work to drain before another
+migration. The native trial hit `DocumentLockedError` when Module Profile jobs
+were queued with workers stopped. Keep traffic in maintenance mode while safely
+resuming workers; preserve any failed ordinary journal and recover forward.
+
 ## Choosing the command
 
 | Goal | Command |

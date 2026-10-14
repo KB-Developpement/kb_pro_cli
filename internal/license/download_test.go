@@ -23,6 +23,7 @@ type recorded struct {
 	URL     *url.URL
 	Version string
 	Auth    string
+	Session string
 }
 
 // stub is a license-server download stub that records every request.
@@ -50,7 +51,7 @@ func newStub(t *testing.T) *stub {
 	}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
-		s.reqs = append(s.reqs, recorded{URL: r.URL, Version: r.Header.Get(CLIVersionHeader), Auth: r.Header.Get("Authorization")})
+		s.reqs = append(s.reqs, recorded{URL: r.URL, Version: r.Header.Get(CLIVersionHeader), Auth: r.Header.Get("Authorization"), Session: r.Header.Get(maintenanceCredentialHeader)})
 		s.mu.Unlock()
 		if s.status != 200 {
 			w.WriteHeader(s.status)
@@ -66,6 +67,20 @@ func newStub(t *testing.T) *stub {
 	}))
 	t.Cleanup(s.srv.Close)
 	return s
+}
+
+func TestDownloadSendsMaintenanceCredential(t *testing.T) {
+	s := newStub(t)
+	r := req()
+	r.SessionCredential = "maintenance-secret"
+	dl, err := DownloadApp(context.Background(), s.srv.URL, "tok", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(dl.Path)
+	if got := s.reqs[0].Session; got != r.SessionCredential {
+		t.Fatalf("session header = %q", got)
+	}
 }
 
 func (s *stub) count() int {

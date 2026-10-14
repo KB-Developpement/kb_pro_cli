@@ -64,6 +64,9 @@ func runActivate(args []string) error {
 	if licenseKey == "" {
 		return fmt.Errorf("no license key provided")
 	}
+	if err := maintenanceActivationGate(licenseKey); err != nil {
+		return err
+	}
 
 	// Captured before activation succeeds and overwrites the cache: it names the
 	// seat an administrator has to release when the key is already at its limit.

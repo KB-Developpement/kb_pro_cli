@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/KB-Developpement/kb_pro_cli/internal/fsutil"
 )
 
 // SupportedSchema is the highest schema_version of any .kb/*.json file this
@@ -51,17 +53,40 @@ func LegacyDir(root string) string { return filepath.Join(RecoveryDir(root), leg
 // UTCStamp is the compact UTC time used in recovery paths: YYYYMMDDTHHMMSSZ.
 func UTCStamp(t time.Time) string { return t.UTC().Format("20060102T150405Z") }
 
-// EnsureDir creates dir (and parents) and then chmods dir itself to 0700.
-// MkdirAll alone leaves the mode of an existing directory unchanged and applies
-// the umask to new ones, so the mode is set explicitly.
+// EnsureDir creates missing parents, sets dir to 0700 and durably publishes its
+// directory entry. Existing entries are synced too, so retries cannot bypass a
+// previous failed directory sync.
 func EnsureDir(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create %s: %w", dir, err)
+	dir = filepath.Clean(dir)
+	parent := filepath.Dir(dir)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if _, err := os.Stat(parent); os.IsNotExist(err) {
+			if err := EnsureDir(parent); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		if err := os.Mkdir(dir, 0o700); err != nil && !os.IsExist(err) {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+	} else if err != nil {
+		return err
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("chmod %s: %w", dir, err)
 	}
-	return nil
+	if err := fsutil.SyncDir(dir); err != nil {
+		return err
+	}
+	return fsutil.SyncDir(parent)
 }
 
 // EnsureKB creates <bench>/.kb with mode 0700.

@@ -5,8 +5,9 @@ description: >
   bench running the KB Frappe fork and the `kb` CLI): `kb` errors, failed installs or
   upgrades, site down after an upgrade, users locked out, license warnings, dev server not
   coming back, `kb` not found, self-update failures, leftover `.kb-old`/`.kb-new`
-  directories, broken `apps.json`, slow or hanging operations, and connectivity to the
-  license server. Use this skill whenever something is wrong on a KB client machine and
+  directories, broken `apps.json`, stuck maintenance sessions, lost maintenance
+  acknowledgements, slow or hanging operations, and connectivity to the license server.
+  Use this skill whenever something is wrong on a KB client machine and
   the cause is not yet known — start here with the symptom, then follow the pointers —
   even if the user only pastes an error or says "kb is broken" / "the site is down after
   the update".
@@ -106,6 +107,27 @@ a fix. Quick triage:
 | `kb init-kb-frappe` says `apps/frappe has no .git of its own … pass --force` | Normal on an already-forked bench (no `.git`); use `--force` to reinstall/upgrade |
 | `kb init-kb-frappe` refused `your license does not allow kb_frappe` | Add `kb_frappe` to the client's apps on the server, then `kb license` twice |
 | Bench has `apps/frappe` from a git clone (KB fork or a dirty/forked stock clone) | `kb init-kb-frappe` refuses, with or without `--force`; only a clean stock `frappe/frappe` checkout is converted (the stock tree is not kept) |
+
+### Maintenance session or recovery
+
+The reviewed maintenance candidate is committed with feature sign-off and a draft
+PR, but remains unreleased. The native two-site main workflow and outage drill
+passed; isolated expiry/contract, attach-interruption and lost-redeem/admin recovery
+drills remain deferred and unpassed. Customer release and rollout approval remain
+gated on those checks; do not present it as a customer-enabled feature. Use [`docs/MAINTENANCE.md`](../../docs/MAINTENANCE.md)
+for authorized trial procedure and state recovery. The isolated-server expiry drill is
+for server operators only; follow [`docs/MAINTENANCE_TRIAL_SERVER.md`](../../docs/MAINTENANCE_TRIAL_SERVER.md)
+without changing production configuration or database.
+
+| Symptom | Response |
+|---|---|
+| Ordinary mutation says maintenance protects the bench | Stop mutations. Run `kb maintenance status` for offline evidence and follow the documented finish, exit or recovery path. Never delete the protected session, Git history or journal to unlock the bench. |
+| Entry code prompt fails or hangs under `--exec` | `maintenance enter` needs a TTY for its no-echo prompt; use interactive `ffm shell <bench>`. Do not put code in arguments or URLs. |
+| Lost redeem response | The one-time credential cannot be recovered by retry. Do not attach Git manually; ask the server operator to confirm the unentered session is closed, then apply every reset condition in the maintenance guide. |
+| Report retry or status says stale/unknown | Retry the saved report using its exact sequence and payload; do not invent a new sequence. After 30 minutes without acknowledgement, treat state as unknown and use the guide's recovery procedure. |
+| Finish rejects an unpushed commit, or exit rejects release ancestry | Push exact support commits to the same remote product repository. The exit release must preserve their ancestry; a squash merge alone does not satisfy exit. Check native Git URL/credential-helper matching; the CLI does not use the license server PAT. |
+| Exit or migration interrupted | Preserve the session, journal, both source sets, retained recovery copy and site backups. Check per-site migration outcomes before choosing recovery; an app/source copy is not a database rollback. Never clear protected state manually. |
+| Approval expired while work remains | Source stays protected. To resume supported edits, follow the guide's same-scope renewal and fresh-entry flow; exit still requires current license contract and installation/key standing. |
 
 ## 2. When to escalate to the server operator
 

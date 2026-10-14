@@ -12,6 +12,10 @@ import (
 
 // runInit shows a first-time setup banner then runs the settings form.
 func runInit() {
+	if err := ordinaryMaintenanceGate(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
+	}
 	fmt.Println("KB Pro CLI — first-time setup")
 	fmt.Println("Configure the license server URL and GitHub token used for private repos.")
 	fmt.Println()
@@ -20,6 +24,10 @@ func runInit() {
 
 // runConfigEdit opens the settings form so the user can change stored values.
 func runConfigEdit() {
+	if err := ordinaryMaintenanceGate(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
+	}
 	runSettingsForm()
 }
 

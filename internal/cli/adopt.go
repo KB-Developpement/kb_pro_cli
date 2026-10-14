@@ -114,6 +114,9 @@ func runAdopt(ctx context.Context, out io.Writer, tagValues []string, check bool
 		return adoptRun(ctx, out, tags, true)
 	}
 	root := bench.Root()
+	if err := ordinaryMaintenanceGate(); err != nil {
+		return &ExitError{Code: adoptRefused, Err: err}
+	}
 	if err := kbstate.CheckBenchOwner(root); err != nil {
 		return &ExitError{Code: adoptRefused, Err: err}
 	}
@@ -122,6 +125,9 @@ func runAdopt(ctx context.Context, out io.Writer, tagValues []string, check bool
 		return &ExitError{Code: adoptRefused, Err: err}
 	}
 	defer lock.Release()
+	if err := ordinaryMaintenanceGate(); err != nil {
+		return &ExitError{Code: adoptRefused, Err: err}
+	}
 	if err := kbstate.CheckSchemas(root); err != nil {
 		return &ExitError{Code: adoptRefused, Err: err}
 	}
