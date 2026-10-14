@@ -56,13 +56,9 @@ func ClearPreviousFingerprint() {
 }
 
 // ActivationLimitHelp returns the operator remedy appended to an
-// activation_limit_reached failure. Both arguments may be empty; placeholders
-// are used instead so the shape of the command is still clear.
-func ActivationLimitHelp(licenseKey, previousFingerprint string) string {
-	key := licenseKey
-	if key == "" {
-		key = "<license-key>"
-	}
+// activation_limit_reached failure. It never includes key material because
+// returned command errors are persisted in the local error log.
+func ActivationLimitHelp(previousFingerprint string) string {
 	old := previousFingerprint
 	if old == "" {
 		old = "<old-fingerprint>"
@@ -71,7 +67,7 @@ func ActivationLimitHelp(licenseKey, previousFingerprint string) string {
 	var b strings.Builder
 	b.WriteString("upgrading kb changes this installation's identifier once, so the previous identifier may still hold a seat on this key.\n")
 	b.WriteString("A KB-Developpement administrator can release it:\n")
-	fmt.Fprintf(&b, "  kbls remove-activation --key %s --fingerprint %s\n", key, old)
+	fmt.Fprintf(&b, "  kbls remove-activation --key %s --fingerprint %s\n", "<license-key>", old)
 	b.WriteString("or raise this key's --max-activations.")
 	return b.String()
 }

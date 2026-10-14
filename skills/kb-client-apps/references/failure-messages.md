@@ -31,7 +31,7 @@ Source: kb_pro_cli v0.8.0. Messages are quoted as printed; `<…>` marks variabl
 | `app_not_licensed` | 403 | App not in the token's `allowed_apps` | Server: add app to client (`kbls edit-client --apps …`), then `kb license` twice |
 | `contract_expired` | 402 | Client contract ended | Server: `kbls edit-client --id <c> --end <date>`, then `kb activate` |
 | `machine_banned` / `activation_not_found` / `license_revoked` | 403 | Machine standing changed on the server | See `kb-client-license` |
-| `client_not_found` | 401 | Client deleted on the server | Recreate client + key, `kb activate <new key>` |
+| `client_not_found` | 401 | Client deleted on the server | Recreate client + key, `kb activate --prompt` |
 | `version_not_found` | 404 | Tag/branch in `--version` does not exist, or the repo has no GitHub release | Check releases; omit `--version` |
 | `upstream_error` | 502 | GitHub refused the server's PAT (expired) or failed | Server side: replace `github_pat` (see `kbls-operations`) |
 | `invalid_version` / `invalid_app_name` | 400 | Malformed ref/app name | Fix the argument |

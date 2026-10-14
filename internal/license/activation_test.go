@@ -7,11 +7,11 @@ import (
 )
 
 func TestActivationLimitHelp_NamesTheOldActivation(t *testing.T) {
-	help := ActivationLimitHelp("KB-ACME-123", "aaaabbbbccccdddd")
+	help := ActivationLimitHelp("aaaabbbbccccdddd")
 
 	for _, want := range []string{
 		"upgrading kb",
-		"kbls remove-activation --key KB-ACME-123 --fingerprint aaaabbbbccccdddd",
+		"kbls remove-activation --key <license-key> --fingerprint aaaabbbbccccdddd",
 		"--max-activations",
 	} {
 		if !strings.Contains(help, want) {
@@ -21,7 +21,7 @@ func TestActivationLimitHelp_NamesTheOldActivation(t *testing.T) {
 }
 
 func TestActivationLimitHelp_PlaceholdersWhenUnknown(t *testing.T) {
-	help := ActivationLimitHelp("", "")
+	help := ActivationLimitHelp("")
 
 	if !strings.Contains(help, "kbls remove-activation --key <license-key> --fingerprint <old-fingerprint>") {
 		t.Errorf("ActivationLimitHelp should fall back to placeholders:\n%s", help)

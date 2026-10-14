@@ -3,6 +3,7 @@ package license
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,5 +117,51 @@ func TestClearLocalLicense(t *testing.T) {
 	}
 	if LoadLicenseKey() != "" {
 		t.Error("LoadLicenseKey: want empty after ClearLocalLicense")
+	}
+}
+
+func TestSaveLicenseKeyReplacesSymlinkWithoutWritingTarget(t *testing.T) {
+	withTempConfigDir(t)
+	target := filepath.Join(t.TempDir(), "unrelated")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(keyPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, keyPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveLicenseKey("replacement-key"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "unchanged" {
+		t.Fatal("saving license key followed the symlink")
+	}
+	info, err := os.Lstat(keyPath())
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		t.Fatal("stored key is not a private regular file")
+	}
+}
+
+func TestLoadLicenseKeyRejectsOversizedInput(t *testing.T) {
+	withTempConfigDir(t)
+	if err := os.WriteFile(keyPath(), []byte(strings.Repeat("x", MaxLicenseKeyBytes+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadLicenseKey(); got != "" {
+		t.Fatal("oversized stored key was accepted")
+	}
+}
+
+func TestMaximumLicenseKeyRoundTrip(t *testing.T) {
+	withTempConfigDir(t)
+	key := strings.Repeat("x", MaxLicenseKeyBytes)
+	if err := SaveLicenseKey(key); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadLicenseKey(); got != key {
+		t.Fatal("maximum-size stored key did not round trip with its trailing newline")
 	}
 }

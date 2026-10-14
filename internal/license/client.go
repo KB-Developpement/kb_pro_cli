@@ -81,7 +81,8 @@ func Activate(serverBaseURL, licenseKey, fingerprint string) (string, error) {
 		case "machine_banned":
 			return "", fmt.Errorf("this machine has been banned — contact KB-Developpement")
 		}
-		return "", fmt.Errorf("activation denied: %s", apiErr.Error)
+		// Unknown error text is untrusted and could reflect submitted key material.
+		return "", fmt.Errorf("activation denied by license server — contact KB-Developpement")
 	case http.StatusConflict:
 		// Wrapped so callers can recognise this case and append the operator
 		// remedy without matching on the message text.
