@@ -203,9 +203,10 @@ An interrupted run is handled by the next mutating command: before the swap, onl
 
 ### Maintenance
 
-Single-app maintenance commands are implemented on the Phase 2 development
-branch. They remain gated on review, the disposable two-site workflow trial and
-maintainer sign-off before customer use. See [the maintenance guide](docs/MAINTENANCE.md)
+Single-app maintenance commands are committed on the Phase 2 development
+branch with feature sign-off and a draft PR. The native two-site main workflow
+and outage drill passed; isolated failure drills remain deferred and required
+before customer release. See [the maintenance guide](docs/MAINTENANCE.md)
 for approval, native Git, reporting, release exit and recovery behavior.
 
 ### License

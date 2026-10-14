@@ -55,9 +55,11 @@ errors see `kb-client-license`; for symptoms without an obvious cause see
 
 ## Maintenance support (candidate under review)
 
-The maintenance candidate is uncommitted and unreleased. The disposable two-site
-workflow trial, failure drills and maintainer sign-off are incomplete; treat this as
-internal trial guidance, not a customer capability. Before any authorized trial, read
+The reviewed maintenance candidate is committed with feature sign-off and a draft
+PR, but remains unreleased. The native two-site main workflow and outage drill
+passed; isolated expiry/contract, attach-interruption and lost-redeem/admin recovery
+drills remain deferred and unpassed. Customer release and rollout approval remain
+gated on those checks; treat this as internal trial guidance. Before any authorized trial, read
 [`docs/MAINTENANCE.md`](../../docs/MAINTENANCE.md). Read
 [`docs/MAINTENANCE_TRIAL_SERVER.md`](../../docs/MAINTENANCE_TRIAL_SERVER.md) only when
 running its isolated-server expiry drill.

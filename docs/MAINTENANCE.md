@@ -1,9 +1,10 @@
 # Single-app maintenance
 
-This implementation is under review. The disposable two-site workflow trial,
-failure drills and maintainer sign-off must pass before a maintenance-capable
-release is enabled on customer benches. This document describes the current
-command behavior; it does not certify that trial.
+The reviewed implementation has feature commit sign-off and is in a draft PR.
+The native two-site main workflow and outage drill passed. Isolated expiry/contract,
+attach-interruption and lost-redeem/admin recovery drills remain deferred and
+unpassed; customer release and rollout approval remain gated on those checks.
+This document describes the current command behavior, not completed acceptance.
 
 Phase 2 supports one READY line-1 app, `kb_compta` or `kb_stock`. Multi-app
 sessions, `--all`, framework maintenance and squash-merge reconciliation are

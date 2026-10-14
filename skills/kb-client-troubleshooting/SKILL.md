@@ -110,9 +110,11 @@ a fix. Quick triage:
 
 ### Maintenance session or recovery
 
-The maintenance implementation is an uncommitted, unreleased candidate. The disposable
-two-site trial, failure drills and maintainer sign-off remain incomplete; do not present
-it as a customer-enabled feature. Use [`docs/MAINTENANCE.md`](../../docs/MAINTENANCE.md)
+The reviewed maintenance candidate is committed with feature sign-off and a draft
+PR, but remains unreleased. The native two-site main workflow and outage drill
+passed; isolated expiry/contract, attach-interruption and lost-redeem/admin recovery
+drills remain deferred and unpassed. Customer release and rollout approval remain
+gated on those checks; do not present it as a customer-enabled feature. Use [`docs/MAINTENANCE.md`](../../docs/MAINTENANCE.md)
 for authorized trial procedure and state recovery. The isolated-server expiry drill is
 for server operators only; follow [`docs/MAINTENANCE_TRIAL_SERVER.md`](../../docs/MAINTENANCE_TRIAL_SERVER.md)
 without changing production configuration or database.
