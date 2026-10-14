@@ -605,7 +605,7 @@ func applyDownloads(ctx context.Context, command string, dlResults []dlResult, p
 		if spinErr := runWithSpinner(
 			fmt.Sprintf("Adding %s to the bench…", ui.AppName.Render(name)),
 			func() {
-				res, applyErr = bench.ApplyArchive(opCtx, bench.ApplyPlan{Command: command, App: dr.app, Download: dr.dl})
+				res, applyErr = bench.ApplyArchive(opCtx, opCtx, bench.ApplyPlan{Command: command, App: dr.app, Download: dr.dl})
 			},
 		); spinErr != nil {
 			applyErr = spinErr

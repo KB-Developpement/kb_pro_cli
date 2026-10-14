@@ -80,7 +80,7 @@ func doInitKBFrappe(ctx context.Context, force bool) error {
 
 	var res bench.ApplyResult
 	if spinErr := runWithSpinner(fmt.Sprintf("Replacing %s with KB Frappe fork…", ui.AppName.Render("frappe")), func() {
-		res, err = bench.ApplyArchive(ctx, bench.ApplyPlan{Command: bench.CmdInitFrappe, App: fw, Download: dl, StockConversion: stock})
+		res, err = bench.ApplyArchive(ctx, ctx, bench.ApplyPlan{Command: bench.CmdInitFrappe, App: fw, Download: dl, StockConversion: stock})
 	}); spinErr != nil {
 		return spinErr
 	}

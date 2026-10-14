@@ -81,7 +81,7 @@ a fix. Quick triage:
 | `version_not_found (HTTP 404)` | Bad `--version`, or the app repo has no GitHub release | Use an existing tag; ask maintainers to publish a release |
 | Upgrade error ends "(the previous version was restored)" | Pre-migrate step failed; bench untouched | Fix cause, retry |
 | Upgrade error "NOT rolled back; the previous source is kept at …kb-old" | `bench migrate` failed | `kb-client-apps` → "Upgrade — how it fails" |
-| Operation hung then `context deadline exceeded` | 10 min (install) / 15 min (upgrade) budget hit — large migrate | Run `bench --site <site> migrate` manually and let it finish |
+| Operation stopped with `context deadline exceeded` | Install has a 10-minute budget. Upgrade preparation shares 15 minutes; migration has a fresh 10-minute budget, subject to caller cancellation/deadline | Read the journal and retained paths first. Before migration, follow the reported rollback outcome. After migration starts, preserve both source trees and follow the migration recovery guidance in `kb-client-apps`; do not delete the pending journal to retry |
 | Leftover `apps/X.kb-new` / `apps/X.kb-old` | Interrupted or failed run | The next swap moves them to `.kb/recovery/legacy/` (never deletes); `kb status` lists them. After a migrate failure keep `.kb-old` until the site is healthy |
 | `apps.json is not valid JSON` during finalize | Corrupt `sites/apps.json` | Repair JSON by hand (valid object, one entry per app); the next mutating command replays the pending journal |
 | Every `kb` mutation refuses, naming `.kb/journal.json` | An interrupted transaction needs an operator | Read the message, restore by hand, delete the journal; `kb status` shows its step |

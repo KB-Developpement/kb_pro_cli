@@ -180,7 +180,10 @@ kb upgrade --to kb_pro=v1.2.0       # Deploy exactly the published release v1.2.
 
 **`kb upgrade`** refuses to run while `apps/frappe` is still stock `frappe/frappe` (run **`kb init-kb-frappe`** first, or pass **`--skip-frappe-check`**) — the same guard as **`kb install`**, **`kb add`**, and **`kb site-install`**.
 
-Per-app timeout is **15 minutes** (download + extract + build + migrate). Use **`--verbose`** for more bench output.
+Per app, download and preparation share **15 minutes**; migration then gets its
+own **10-minute** step budget. The original caller cancellation/deadline still
+applies to both phases. A migration timeout keeps the journal pending and both
+source trees in place; it never automatically rolls back schema changes. Use **`--verbose`** for more bench output.
 
 Replacing an app directory takes a running dev server down with it, so **`kb upgrade`** records whether one was running before the first download and — once at least one app has upgraded — restarts it, or starts it again if the upgrade killed it. See [Install apps](#install-apps) for the full rule.
 
