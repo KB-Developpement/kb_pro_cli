@@ -51,7 +51,7 @@ func runLicenseMenu() {
 			pause()
 
 		case licMenuActivate:
-			if err := runActivate("", false, os.Stdin); err != nil {
+			if err := activateAndRefresh(func() error { return runActivate("", false, os.Stdin) }); err != nil {
 				errlog.Log(err)
 				fmt.Fprintf(os.Stderr, "\n%s %v\n", ui.Failure.Render("Error:"), err)
 			}
@@ -62,6 +62,17 @@ func runLicenseMenu() {
 			pause()
 		}
 	}
+}
+
+// activateAndRefresh runs an activation and, only when it succeeds, reloads the
+// in-memory license state so the menu header stops showing the pre-activation
+// state. A failed or aborted-with-error activation leaves the snapshot alone.
+func activateAndRefresh(activate func() error) error {
+	if err := activate(); err != nil {
+		return err
+	}
+	runCheckFn()
+	return nil
 }
 
 func runLicenseDeactivate() {

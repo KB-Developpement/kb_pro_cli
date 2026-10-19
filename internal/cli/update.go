@@ -76,22 +76,23 @@ var githubHTTPClient = resty.New().
 // API response and need a longer ceiling.
 var githubDownloadClient = resty.New().SetTimeout(5 * time.Minute)
 
-func runUpdate(ctx context.Context, checkOnly, yes bool) error {
-	current := version.Version
+// updateInfo is the outcome of asking GitHub for the latest kb release.
+type updateInfo struct {
+	Current string
+	Latest  string
+	// Newer is true when there is a release to install: Latest is higher than
+	// Current, or this is a dev build (which is never "up to date").
+	Newer bool
+	Dev   bool
 
-	// License gate: downloading a new binary requires an active license.
-	// --check is always allowed (it's just a read operation).
-	// RunCheck populates cachedState from disk since kb update skips the
-	// license check in PersistentPreRunE (skipLicenseCheck annotation).
-	if !checkOnly {
-		license.RunCheck()
-		if err := license.RunSyncCheck(ctx); err != nil {
-			return err
-		}
-		if !license.IsValid() {
-			return fmt.Errorf("active license required to update — run: kb activate")
-		}
-	}
+	release githubRelease
+}
+
+// checkLatestRelease asks GitHub for the latest release and compares it with
+// the running version. It prints nothing besides the spinner title, so `kb
+// update` and the menu can each report the result their own way.
+func checkLatestRelease() (updateInfo, error) {
+	current := version.Version
 
 	var release githubRelease
 	var fetchErr error
@@ -108,48 +109,78 @@ func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 		}
 	})
 	if fetchErr != nil {
-		return fetchErr
+		return updateInfo{}, fetchErr
 	}
 
 	latest := release.TagName
 	if latest == "" {
-		return fmt.Errorf("no releases found on GitHub")
+		return updateInfo{}, fmt.Errorf("no releases found on GitHub")
 	}
 
 	isDev := current == "dev" || current == ""
-	upToDate := !isDev && !newerThan(current, latest)
+	return updateInfo{
+		Current: current,
+		Latest:  latest,
+		Newer:   isDev || newerThan(current, latest),
+		Dev:     isDev,
+		release: release,
+	}, nil
+}
 
-	if upToDate {
-		if !globalFlags.Quiet {
-			fmt.Fprintf(os.Stderr, "Already up to date (%s)\n", current)
+// reportUpdateCheck prints the result of checkLatestRelease to stderr.
+func reportUpdateCheck(info updateInfo) {
+	if globalFlags.Quiet {
+		return
+	}
+	switch {
+	case !info.Newer:
+		fmt.Fprintf(os.Stderr, "Already up to date (%s)\n", info.Current)
+	case info.Dev:
+		fmt.Fprintf(os.Stderr, "Running a dev build. Latest release: %s\n", info.Latest)
+	default:
+		fmt.Fprintf(os.Stderr, "Update available: %s → %s\n", info.Current, info.Latest)
+	}
+}
+
+// updateLicenseGate is a variable only so a test can run the update flow
+// without a signed license token.
+var updateLicenseGate = requireLicenseForUpdate
+
+// requireLicenseForUpdate is the license gate for replacing the binary:
+// downloading a new binary requires an active license. Checking only never
+// needs it. RunCheck populates cachedState from disk since kb update skips the
+// license check in PersistentPreRunE (skipLicenseCheck annotation).
+func requireLicenseForUpdate(ctx context.Context) error {
+	license.RunCheck()
+	if err := license.RunSyncCheck(ctx); err != nil {
+		return err
+	}
+	if !license.IsValid() {
+		return fmt.Errorf("active license required to update — run: kb activate")
+	}
+	return nil
+}
+
+func runUpdate(ctx context.Context, checkOnly, yes bool) error {
+	// --check is always allowed (it's just a read operation).
+	if !checkOnly {
+		if err := updateLicenseGate(ctx); err != nil {
+			return err
 		}
+	}
+
+	info, err := checkLatestRelease()
+	if err != nil {
+		return err
+	}
+	reportUpdateCheck(info)
+	if !info.Newer || checkOnly {
 		return nil
 	}
 
-	if !globalFlags.Quiet {
-		if isDev {
-			fmt.Fprintf(os.Stderr, "Running a dev build. Latest release: %s\n", latest)
-		} else {
-			fmt.Fprintf(os.Stderr, "Update available: %s → %s\n", current, latest)
-		}
-	}
-
-	if checkOnly {
-		return nil
-	}
-
-	target := releaseAssetName(latest)
-	var downloadURL, checksumsURL string
-	for _, a := range release.Assets {
-		switch a.Name {
-		case target:
-			downloadURL = a.BrowserDownloadURL
-		case checksumsAssetName:
-			checksumsURL = a.BrowserDownloadURL
-		}
-	}
-	if downloadURL == "" {
-		return fmt.Errorf("no asset found for %s/%s (expected %q)", runtime.GOOS, runtime.GOARCH, target)
+	downloadURL, checksumsURL, target, err := updateAssetURLs(info)
+	if err != nil {
+		return err
 	}
 
 	if !yes {
@@ -157,7 +188,7 @@ func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 		err := huh.NewForm(
 			huh.NewGroup(
 				huh.NewConfirm().
-					Title(fmt.Sprintf("Install kb %s?", latest)).
+					Title(fmt.Sprintf("Install kb %s?", info.Latest)).
 					Description("←/→ or Y/N · Enter to confirm · Esc/Ctrl+C to cancel").
 					Value(&confirmed),
 			),
@@ -168,6 +199,29 @@ func runUpdate(ctx context.Context, checkOnly, yes bool) error {
 		}
 	}
 
+	return installUpdate(info.Latest, downloadURL, checksumsURL, target)
+}
+
+// updateAssetURLs finds the binary archive for this platform and the checksum
+// manifest in the release.
+func updateAssetURLs(info updateInfo) (downloadURL, checksumsURL, target string, err error) {
+	target = releaseAssetName(info.Latest)
+	for _, a := range info.release.Assets {
+		switch a.Name {
+		case target:
+			downloadURL = a.BrowserDownloadURL
+		case checksumsAssetName:
+			checksumsURL = a.BrowserDownloadURL
+		}
+	}
+	if downloadURL == "" {
+		return "", "", "", fmt.Errorf("no asset found for %s/%s (expected %q)", runtime.GOOS, runtime.GOARCH, target)
+	}
+	return downloadURL, checksumsURL, target, nil
+}
+
+// installUpdate downloads, verifies and swaps in the new binary.
+func installUpdate(latest, downloadURL, checksumsURL, target string) error {
 	var installErr error
 	_ = runWithSpinner(fmt.Sprintf("Downloading kb %s…", latest), func() {
 		installErr = downloadAndInstall(downloadURL, checksumsURL, target)

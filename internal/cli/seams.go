@@ -8,6 +8,7 @@ var (
 	syncLicenseFn = license.RunSyncCheck
 	allowedSetFn  = license.AllowedSet
 	cachedTokenFn = license.GetCachedToken
+	runCheckFn    = license.RunCheck
 )
 
 // downloadConcurrency bounds parallel archive downloads. Tests set it to 1 to
