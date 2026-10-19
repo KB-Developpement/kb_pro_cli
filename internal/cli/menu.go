@@ -24,6 +24,11 @@ const (
 	menuLicense      = "license"
 	menuSettings     = "settings"
 	menuInitKBFrappe = "init-kb-frappe"
+	menuStatus       = "status"
+	menuAdopt        = "adopt"
+	menuUpdate       = "update"
+	menuCheckUpdates = "check-updates"
+	menuUpgradeTo    = "upgrade-to"
 )
 
 // clearScreen writes the standard ANSI escape sequence to clear the terminal.
@@ -66,28 +71,18 @@ func runMainMenu() error {
 
 	for {
 		clearScreen()
-		if !globalFlags.Quiet {
-			fmt.Fprintln(os.Stderr, ui.Dim.Render("Site: "+site))
-		}
+		printMenuHeader(site)
 
 		// Re-check Frappe origin each iteration so the menu updates after Init KB Frappe runs.
 		isStock, frappeErr := bench.DetectFrappeOrigin()
 		if frappeErr == nil && isStock {
-			// License + Settings are always shown so a freshly-installed bench can
-			// reach activation. Init KB Frappe enforces its own license check
-			// inside runInitKBFrappe and surfaces a clear error if kb_frappe is
-			// not in the activated allowed_apps.
 			var choice string
 			if err := huh.NewForm(
 				huh.NewGroup(
 					huh.NewSelect[string]().
 						Title("KB — What would you like to do?").
 						Description("↑/↓ to navigate · Enter to confirm · Esc/Ctrl+C to cancel").
-						Options(
-							huh.NewOption("Init KB Frappe        — replace stock Frappe with KB fork", menuInitKBFrappe),
-							huh.NewOption("License               — status, activate, deactivate locally", menuLicense),
-							huh.NewOption("Settings              — license server URL, GitHub token", menuSettings),
-						).
+						Options(mainMenuOptions(menuState{Stock: true})...).
 						Value(&choice),
 				),
 			).WithKeyMap(formKeyMap()).Run(); err != nil {
@@ -103,8 +98,14 @@ func runMainMenu() error {
 					errlog.Log(actionErr)
 					fmt.Fprintf(os.Stderr, "\n%s %v\n", ui.Failure.Render("Error:"), actionErr)
 				}
+			case menuStatus:
+				runMenuStatus()
 			case menuLicense:
 				runLicenseMenu()
+			case menuUpdate:
+				if runMenuUpdate(context.Background()) {
+					return nil // the binary changed; restart kb
+				}
 			case menuSettings:
 				runConfigEdit()
 			}
@@ -118,15 +119,7 @@ func runMainMenu() error {
 				huh.NewSelect[string]().
 					Title("KB — What would you like to do?").
 					Description("↑/↓ to navigate · Enter to confirm · Esc/Ctrl+C to cancel").
-					Options(
-						huh.NewOption("Install apps          — download and install on this site", menuInstall),
-						huh.NewOption("Add apps to bench     — download only, skip site install", menuAdd),
-						huh.NewOption("Site-install apps     — install already-downloaded apps on site", menuSiteInstall),
-						huh.NewOption("Manage apps           — uninstall / remove from bench", menuManage),
-						huh.NewOption("Upgrade apps          — pull latest changes and migrate", menuUpgrade),
-						huh.NewOption("License               — status, activate, deactivate locally", menuLicense),
-						huh.NewOption("Settings              — license server URL, GitHub token", menuSettings),
-					).
+					Options(mainMenuOptions(menuState{})...).
 					Value(&choice),
 			),
 		).WithKeyMap(formKeyMap()).Run(); err != nil {
@@ -150,8 +143,27 @@ func runMainMenu() error {
 		case menuUpgrade:
 			cancel() // release the 10-min context; upgrade manages its own per-app timeouts
 			actionErr = runUpgrade(context.Background(), nil, nil)
+		case menuCheckUpdates:
+			cancel() // the check and the upgrade after it manage their own deadlines
+			actionErr = runMenuCheckUpdates(context.Background())
+		case menuUpgradeTo:
+			cancel() // runUpgrade manages its own per-app timeouts
+			actionErr = runMenuUpgradeTo(context.Background())
+		case menuStatus:
+			runMenuStatus()
+			pause()
+		case menuAdopt:
+			cancel() // adopt has no overall deadline of its own
+			runMenuAdopt(context.Background())
+			pause()
 		case menuLicense:
 			runLicenseMenu()
+		case menuUpdate:
+			if runMenuUpdate(context.Background()) {
+				cancel()
+				return nil // the binary changed; restart kb
+			}
+			pause()
 		case menuSettings:
 			runConfigEdit()
 		}

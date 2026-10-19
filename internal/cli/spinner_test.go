@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -81,5 +83,29 @@ func TestRunWithSpinner_NonTTYPropagatesNothingAndStillRunsOnQuiet(t *testing.T)
 	}
 	if got := strings.Count(out, "Building assets…"); got != 1 {
 		t.Fatalf("title printed %d times, want exactly 1 (output %q)", got, out)
+	}
+}
+
+func TestRunWithSpinnerErr_NonTTYPrintsTitleOnceAndReturnsTheError(t *testing.T) {
+	const title = "Checking for updates…"
+	boom := errors.New("boom")
+
+	var got error
+	ran := 0
+	out := captureStdout(t, func() {
+		got = runWithSpinnerErr(context.Background(), title, func(context.Context) error { ran++; return boom })
+	})
+	if !errors.Is(got, boom) || ran != 1 {
+		t.Fatalf("err = %v after %d runs, want the action's error after one", got, ran)
+	}
+	if strings.Count(out, title) != 1 || strings.Count(out, "\n") != 1 || strings.ContainsAny(out, spinnerFrames) {
+		t.Fatalf("non-TTY output = %q, want the title once and no frames", out)
+	}
+
+	out = captureStdout(t, func() {
+		got = runWithSpinnerErr(context.Background(), title, func(context.Context) error { return nil })
+	})
+	if got != nil {
+		t.Fatalf("err = %v, want nil", got)
 	}
 }

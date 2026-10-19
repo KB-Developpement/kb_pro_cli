@@ -33,14 +33,8 @@ func updateCheckPath() string {
 func runUpdateCheck() {
 	path := updateCheckPath()
 
-	data, err := os.ReadFile(path)
+	state, err := readUpdateCheck(path)
 	if err != nil {
-		startBackgroundFetch(path)
-		return
-	}
-
-	var state updateCheckState
-	if err := json.Unmarshal(data, &state); err != nil {
 		startBackgroundFetch(path)
 		return
 	}
@@ -53,6 +47,20 @@ func runUpdateCheck() {
 	if time.Since(state.CheckedAt) > updateCheckInterval {
 		startBackgroundFetch(path)
 	}
+}
+
+// readUpdateCheck loads the cached release state. It only reads the file: no
+// network, no refresh.
+func readUpdateCheck(path string) (updateCheckState, error) {
+	var state updateCheckState
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return state, err
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return updateCheckState{}, err
+	}
+	return state, nil
 }
 
 func startBackgroundFetch(path string) {

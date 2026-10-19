@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -30,6 +31,17 @@ func runWithSpinner(title string, fn func()) error {
 		return nil
 	}
 	return spinner.New().Title(title).Action(fn).Run()
+}
+
+// runWithSpinnerErr is runWithSpinner for an action that takes a context and
+// returns an error (an HTTP request). It has the same non-TTY, --no-input and
+// --quiet gate; the result is the action's error, or the spinner's own failure.
+func runWithSpinnerErr(ctx context.Context, title string, fn func(context.Context) error) error {
+	if plainSpinnerOutput() {
+		fmt.Fprintln(os.Stdout, ui.Dim.Render(title))
+		return fn(ctx)
+	}
+	return spinner.New().Title(title).Context(ctx).ActionWithErr(fn).Run()
 }
 
 // plainSpinnerOutput reports whether spinner animation must be suppressed.

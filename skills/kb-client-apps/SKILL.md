@@ -8,7 +8,7 @@ description: >
   from a failed upgrade (`.kb-old` rollback, `bench migrate` failures), handle the dev
   server and production restarts, and self-update `kb`. Use this skill whenever someone
   wants to install, update, upgrade, roll back, remove or pin a KB app on a bench, asks
-  what `kb install`/`kb upgrade`/`kb add`/`kb site-install`/`kb manage`/`kb update` do, or
+  what `kb install`/`kb upgrade`/`kb updates`/`kb add`/`kb site-install`/`kb manage`/`kb update` do, asks which apps have a newer release, or
   reports a failed KB app install or upgrade — even if they just say "update the apps on
   the client" or "kb_compta is outdated".
 ---
@@ -61,10 +61,31 @@ errors see `kb-client-license`; for symptoms without an obvious cause see
 | Put source in the bench only (multi-site benches, stage now/install later) | `kb add --apps a,b` |
 | Install something already in the bench onto the site | `kb site-install --apps a` |
 | Newest release of apps already in the bench | `kb upgrade --apps a,b` (alias `kb up`) |
+| Which installed apps have a newer release | `kb updates` (`--json`; read-only, no lock) |
 | Uninstall from the site / delete from the bench | `kb manage` (interactive only; `-f` passes `--force` to `bench uninstall-app`) |
 | Update the `kb` binary | `kb update` (`--check` to only look) |
 
-`kb` with no arguments opens the same actions as a menu (TTY only).
+`kb` with no arguments opens the same actions as a menu (TTY only). The menu also has
+**Check for updates** (`kb updates`, then pick apps and confirm to upgrade them),
+**Upgrade to a release** (pick an installed app, type an exact tag, confirm; runs
+`kb upgrade --to <app>=<tag>`), **Status** (`kb status`), **Adopt** (`kb adopt --check`, then a confirmation before the
+real `kb adopt`; full menu only) and **Update kb** (`kb update`, confirmation first; the
+menu closes after a successful update, restart `kb`). A header above the menu shows the
+version, cached license state, bench root and site, and warns about an unfinished journal,
+a lock held by another process and a newer cached `kb` release (no network request).
+
+## Check for updates (`kb updates`)
+
+`kb updates [--json]` compares each KB app's receipt (tag + commit) with the newest
+published release on its line, asked from the license server (`GET /apps`; kb never
+calls GitHub). Read-only: no lock, no bench change, exit 0 with or without updates,
+non-zero when the check fails. States: `up to date`, `update available` (newer tag, or
+`tag moved`), `ahead`, `differs` (tags cannot be ordered: not both valid semver, or equal versions with different
+tag names; or the receipt line is not the registry line `kb upgrade` installs), `unknown` (no valid receipt: run
+`kb adopt`; app missing from the answer; or the server's line error key such as
+`line_not_found` / `upstream_error`), `not archive-managed` (Git checkout or maintenance
+source). "license server does not support version check" means the server is older than
+the CLI: upgrade apps with `kb upgrade` as before. Apply with `kb upgrade --apps a,b`.
 
 ## Install / add — what actually runs
 

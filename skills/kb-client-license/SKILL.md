@@ -142,6 +142,11 @@ are logged there. The fork logs its own deletions in `logs/kb_license.log`
 answer for a given seat is reproducible: ask the operator to check the client, key,
 activation and ban list.
 
+The `kb` menu header shows the license state from the local cache only (`active (<tier>,
+token valid until …)`, `token expired …` or `not activated`); it makes no server request,
+so it can lag behind a revocation until `kb license` or a heartbeat runs. It reloads from the
+cache after a successful License → Activate in the menu.
+
 **Deactivate locally**: menu `kb` → License → "Deactivate locally" deletes
 `license.json`, `license.jwt`, `license_key` and `previous-fingerprint` (keeps
 `machine-id`, so re-activating reuses the same seat). It does not tell the server — the

@@ -51,6 +51,9 @@ if `ffm` is not on PATH). Never paste license keys or full tokens anywhere.
 | `kb must be run inside a Frappe bench container…` | Not in the container / non-default bench path | `ffm shell <bench>`; or `export KB_BENCH_ROOT=…` |
 | `configuration required — run kb init…` in scripts | No config file, no `KB_LICENSE_SERVER` | See `kb-client-setup` step 2 |
 | Bare `kb` exits silently or errors under `--exec` | Menu needs a TTY | Use subcommands (`kb install --no-input --apps …`) |
+| Menu header warns `Unfinished <op> of <app>` or `Lock: .kb/lock names PID …` | Interrupted transaction, or another kb run (or a reused PID in a stale `.kb/lock`) | Menu **Status** (or `kb status`); kb resolves the journal before the next change |
+| `kb updates`: `license server does not support version check` | The license server predates `GET /apps` | Nothing to fix on the bench; `kb upgrade` still works. Ask the maintainers to deploy a server with `/apps` |
+| `kb updates` shows `unknown (no receipt: run kb adopt)` | The app was installed before receipts existed | `kb adopt --check`, then `kb adopt` |
 | Output full of spinner fragments | Old `kb` (<0.7.1) in non-TTY | `kb update` |
 | `Update available: …` keeps showing | Newer release exists | `kb update` (needs active license) |
 | `kb update`: `no write permission … try running with sudo` | Binary owned by root | `sudo kb update` or reinstall into `~/.local/bin` |
@@ -102,7 +105,7 @@ a fix. Quick triage:
 
 | Symptom | Fix |
 |---|---|
-| Menu still shows only "Init KB Frappe" after init | Init failed — rerun `kb init-kb-frappe --force` and read the error |
+| Menu still shows the reduced stock-bench list (Init KB Frappe, Status, License, Update kb, Settings) after init | Init failed — rerun `kb init-kb-frappe --force` and read the error |
 | `kb init-kb-frappe` says `apps/frappe has no .git of its own … pass --force` | Normal on an already-forked bench (no `.git`); use `--force` to reinstall/upgrade |
 | `kb init-kb-frappe` refused `your license does not allow kb_frappe` | Add `kb_frappe` to the client's apps on the server, then `kb license` twice |
 | Bench has `apps/frappe` from a git clone (KB fork or a dirty/forked stock clone) | `kb init-kb-frappe` refuses, with or without `--force`; only a clean stock `frappe/frappe` checkout is converted (the stock tree is not kept) |

@@ -57,12 +57,16 @@ kb
 
 The main menu lists every top-level action. After each action you return here — press **`Esc`** or **`Ctrl+C`** to exit to the shell. Nested menus (**Manage**, **License**) use the same keys to go back.
 
+Above the list a header shows, from local files only (no network request): the `kb` version, the cached license state, the bench root and the site. It adds a warning line for an unfinished transaction in `.kb/journal.json`, for a `.kb/lock` that names another running process, and for a newer `kb` release known from the cached background check (choose **Update kb**).
+
 On a **fresh bench** where `apps/frappe` is still the stock `frappe/frappe` repo, the menu shows a reduced set of options until the KB Frappe fork is in place — **License** and **Settings** are always available so you can activate your license before running Init KB Frappe:
 
 ```
 KB — What would you like to do?
   > Init KB Frappe        — replace stock Frappe with KB fork
+    Status                — provenance, journal, lock holder (read-only)
     License               — status, activate, deactivate locally
+    Update kb             — check GitHub, replace this binary
     Settings              — license server URL, GitHub token
 ```
 
@@ -75,9 +79,20 @@ KB — What would you like to do?
     Site-install apps     — install already-downloaded apps on site
     Manage apps           — uninstall / remove from bench
     Upgrade apps          — pull latest changes and migrate
+    Check for updates     — compare installed apps with the newest releases
+    Upgrade to a release  — install one exact published tag of an app
+    Status                — provenance, journal, lock holder (read-only)
+    Adopt                 — match installed apps to releases, write receipts
     License               — status, activate, deactivate locally
-    Settings              — license server URL, optional GitHub token (legacy field)
+    Update kb             — check GitHub, replace this binary
+    Settings              — license server URL, GitHub token
 ```
+
+- **Check for updates** (full menu only) runs `kb updates` behind a spinner and shows the table. When at least one app has an *update available* it opens a multi-select with those apps ticked, asks to confirm and then runs the same upgrade as **Upgrade apps** for the ones you keep. Nothing changes without the confirmation. A license server that predates the version check is reported as an error ("license server does not support version check") and the menu keeps working.
+- **Upgrade to a release** (full menu only) lists the KB apps present in the bench, asks for an exact release tag, confirms, then runs `kb upgrade --to <app>=<tag>` for that app: the server must confirm the tag is a published release. With no KB app in the bench it shows a note instead of a list.
+- **Status** runs `kb status` and waits for Enter.
+- **Adopt** (full menu only) runs `kb adopt --check` and shows its output. When at least one app would be adopted and the check was not refused, it asks to confirm and then runs `kb adopt` (which takes the bench lock). Nothing is written without the confirmation.
+- **Update kb** runs the same GitHub check as `kb update --check` and shows the result. If a newer release exists it needs an active license, asks to confirm, then replaces the binary the way `kb update` does. After a successful update the menu closes: restart `kb` to run the new version.
 
 ### Init KB Frappe
 
@@ -97,7 +112,7 @@ An `apps/frappe` that holds a `.git` is converted only if it is a **clean stock 
 4. Writes the receipt `.kb/apps/frappe.json` and updates `sites/apps.json` with the new version
 5. Restarts the dev server, or starts it again if replacing `apps/frappe` took it down (see [Install apps](#install-apps))
 
-After this completes the full 7-option menu is available on the next iteration. `kb_frappe` is a private fork of `frappe/frappe`; its Python package name and on-disk directory remain `frappe` — nothing in any installed app needs to change.
+After this completes the full menu is available on the next iteration. `kb_frappe` is a private fork of `frappe/frappe`; its Python package name and on-disk directory remain `frappe` — nothing in any installed app needs to change.
 
 > **Note:** The operation has a 90-minute ceiling (the download itself 10 minutes) — `bench build` and `bench migrate` on a fresh Frappe install can take 15+ minutes.
 
@@ -186,6 +201,26 @@ applies to both phases. A migration timeout keeps the journal pending and both
 source trees in place; it never automatically rolls back schema changes. Use **`--verbose`** for more bench output.
 
 Replacing an app directory takes a running dev server down with it, so **`kb upgrade`** records whether one was running before the first download and — once at least one app has upgraded — restarts it, or starts it again if the upgrade killed it. See [Install apps](#install-apps) for the full rule.
+
+### Check for updates
+
+```bash
+kb updates            # table: installed vs newest release on the app's line
+kb updates --json     # the same rows as JSON
+```
+
+`kb updates` is read-only: no bench lock, nothing written under the bench, no archive downloaded. It reads the receipt of every KB app in the bench (tag and commit) and asks the license server for the newest published release on each line (`GET /apps`, with your license token; `kb` never calls GitHub for this). It uses the normal license check, so an expired or missing license stops it. One row per app:
+
+| State | Meaning |
+|---|---|
+| `up to date` | the installed commit is the newest release on the line |
+| `update available` | the newest release has a higher semver tag, or the same tag now points at another commit (`tag moved`) |
+| `ahead` | the installed tag is a higher version than the newest release on the line |
+| `differs` | the tags cannot be ordered (not both valid semver, or equal versions with different tag names), or the receipt's line is not the registry line that `kb upgrade` installs |
+| `unknown` | no valid receipt (run `kb adopt`), the app is missing from the server's answer, or the server reports an error for its line (the error key is shown, for example `line_not_found` or `upstream_error`) |
+| `not archive-managed` | the app is a Git checkout or its receipt comes from a maintenance source, so kb does not compare it |
+
+The line is the one in the app's receipt (the registry line when the receipt has none). The table shows the tag with the first 12 characters of the commit for both sides, plus the provenance; `--json` carries the full 40-character commits. The command exits `0` whether or not updates exist and non-zero when the check itself fails (network, license, or a server without `GET /apps`). Apply updates with `kb upgrade --apps ...`, or choose **Check for updates** in the menu.
 
 ### Bench state: lock, journal, receipts
 
@@ -323,6 +358,7 @@ kb init-kb-frappe          Replace stock apps/frappe with the licensed KB Frappe
 kb manage   (alias: m)     Interactive manage submenu (uninstall from site / remove from bench)
 kb upgrade  (alias: up)    Download the line's newest release, rebuild assets, and migrate KB apps already in bench (--apps, --to <app>=<tag>, --skip-frappe-check)
 kb status                  Read-only report: provenance, journal step, retained copies, lock holder
+kb updates                 Read-only version check: installed receipts vs the newest release per line (--json)
 kb adopt                   Match an archive bench against releases and write receipts (--tag <app>=<tag>, --check)
 kb activate (alias: a)     Activate this machine with a KB Pro license key
 kb license                 Show current license status (live server check)
@@ -367,6 +403,7 @@ kb site-install --no-input --apps kb_cheque
 kb upgrade      --no-input --apps kb_pro,kb_compta
 kb upgrade      --no-input --to kb_pro=v1.2.0
 kb adopt        --check
+kb updates      --json
 kb init-kb-frappe --force --no-input
 kb activate --key-file /run/secrets/kb-license-key --no-input
 kb update  --no-input --yes        # or just --no-input (implies --yes)

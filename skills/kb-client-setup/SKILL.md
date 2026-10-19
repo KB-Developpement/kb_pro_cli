@@ -131,7 +131,7 @@ kb init-kb-frappe --force --no-input   # scripted; also the way to re-run / upgr
 ```
 
 Or from the menu (`kb` with no arguments): on a stock bench the menu shows only
-**Init KB Frappe / License / Settings**.
+**Init KB Frappe / Status / License / Update kb / Settings**.
 
 What it does: checks the license allows `kb_frappe`, downloads the fork tarball through
 the license server, extracts it to `apps/frappe.kb-new`, renames the old tree to
