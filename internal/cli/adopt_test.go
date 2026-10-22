@@ -470,7 +470,7 @@ func TestAdoptAmbiguousAndSameCommitCountsOnce(t *testing.T) {
 func TestAdoptSkipsAndRefusesByRule(t *testing.T) {
 	h := legacyBench(t)
 	h.seed("kb_distri", "v1.2.0", false)
-	h.seed("kb_cheque", "v1.2.0", true) // valid receipt: skipped
+	h.seed("kb_cheque", "v1.2.0", true)    // valid receipt: skipped
 	h.seed("kb_facilite", "v1.2.0", false) // not licensed: skipped
 	allowed := allowedSetFn
 	allowedSetFn = func() map[string]bool {
