@@ -62,7 +62,7 @@ func updatableRowsFixture() []updateRow {
 		{App: "kb_pro", InstalledTag: "v1.0.0", LatestTag: "v1.2.0", State: stateUpdateAvailable},
 		{App: "kb_compta", InstalledTag: "v1.2.0", LatestTag: "v1.2.0", State: stateUpToDate},
 		{App: "kb_cheque", InstalledTag: "v1.2.0", LatestTag: "v1.2.0", State: stateUpdateAvailable, Note: "tag moved"},
-		{App: "kb_stock", State: stateUnknown},
+		{App: "kb_facilite", State: stateUnknown},
 	}
 }
 
@@ -99,8 +99,8 @@ func TestUpdatePickFormKeepsThePreselection(t *testing.T) {
 }
 
 func TestUpgradeAppOptions(t *testing.T) {
-	opts := upgradeAppOptions([]upgradeChoice{{App: "kb_pro", Installed: "v1.1.0"}, {App: "kb_stock"}})
-	if got := optionValues(opts); strings.Join(got, ",") != "kb_pro,kb_stock" {
+	opts := upgradeAppOptions([]upgradeChoice{{App: "kb_pro", Installed: "v1.1.0"}, {App: "kb_facilite"}})
+	if got := optionValues(opts); strings.Join(got, ",") != "kb_pro,kb_facilite" {
 		t.Fatalf("values = %v", got)
 	}
 	if !strings.Contains(opts[0].Key, "installed v1.1.0") || !strings.Contains(opts[1].Key, "no receipt") {
@@ -296,7 +296,7 @@ func TestMenuUpgradeToPinsTheTag(t *testing.T) {
 	for _, c := range offered {
 		names = append(names, c.App)
 	}
-	if strings.Join(names, ",") != "kb_pro,kb_compta,kb_cheque,kb_stock" {
+	if strings.Join(names, ",") != "kb_pro,kb_compta,kb_cheque,kb_facilite" {
 		t.Errorf("offered apps = %v", names)
 	}
 	if offered[0].Installed != "v1.0.0" || offered[2].Installed != "" {

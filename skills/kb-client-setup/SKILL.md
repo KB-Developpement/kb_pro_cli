@@ -168,7 +168,7 @@ Install order matters. `kb_pro` is the ERPNext replacement the others build on:
 | App | Requires |
 |---|---|
 | `kb_pro` | the KB Frappe fork |
-| `kb_compta`, `kb_cheque`, `kb_stock`, `AchatsExtern` | `kb_pro` (install it first) |
+| `kb_compta`, `kb_cheque`, `AchatsExtern` | `kb_pro` (install it first) |
 | `kb_print` | nothing beyond the fork |
 | `kb_facilite`, `HR2025`, `kb_distri`, `kb_commercial` | check the app's `required_apps` in `apps/<app>/<app>/hooks.py` after `kb add` |
 

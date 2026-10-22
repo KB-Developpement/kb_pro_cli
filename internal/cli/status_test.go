@@ -27,8 +27,8 @@ func TestStatusReportsProvenanceJournalAndRetainedCopies(t *testing.T) {
 	j.Op, j.Command, j.App, j.Directory = kbstate.OpSwap, "upgrade", "kb_pro", "kb_pro"
 	must(t, j.Advance(kbstate.StepSwapped))
 	// a Git checkout
-	h.seed("kb_stock", "v1.0.0", false)
-	must(t, os.MkdirAll(filepath.Join(h.appDir("kb_stock"), ".git"), 0o755))
+	h.seed("kb_facilite", "v1.0.0", false)
+	must(t, os.MkdirAll(filepath.Join(h.appDir("kb_facilite"), ".git"), 0o755))
 
 	pid := h.holdLock()
 	before := h.benchDigest()
@@ -65,8 +65,8 @@ func TestStatusReportsProvenanceJournalAndRetainedCopies(t *testing.T) {
 	if l := line("kb_compta"); !strings.Contains(l, "unknown") || !strings.Contains(l, "no receipt") {
 		t.Errorf("kb_compta line: %q", l)
 	}
-	if l := line("kb_stock"); !strings.Contains(l, "[Git checkout]") {
-		t.Errorf("kb_stock line: %q", l)
+	if l := line("kb_facilite"); !strings.Contains(l, "[Git checkout]") {
+		t.Errorf("kb_facilite line: %q", l)
 	}
 	if !regexp.MustCompile(regexp.QuoteMeta(legacy) + `\s+2\.0 KiB`).MatchString(out) {
 		t.Errorf("legacy copy size not shown:\n%s", out)

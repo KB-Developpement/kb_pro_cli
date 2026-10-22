@@ -206,15 +206,15 @@ func stubFetchApps(t *testing.T, resp *license.AppsResponse, err error) *[]strin
 }
 
 // updatesBench seeds kb_pro (installed v1.0.0), kb_compta (installed v1.2.0),
-// kb_cheque (no receipt) and kb_stock (a Git checkout).
+// kb_cheque (no receipt) and kb_facilite (a Git checkout).
 func updatesBench(t *testing.T) *benchH {
 	t.Helper()
 	h := newBenchH(t)
 	h.seed("kb_pro", "v1.0.0", true)
 	h.seed("kb_compta", "v1.2.0", true)
 	h.seed("kb_cheque", "v1.0.0", false)
-	h.seed("kb_stock", "v1.0.0", false)
-	must(t, os.MkdirAll(h.appDir("kb_stock")+"/.git", 0o755))
+	h.seed("kb_facilite", "v1.0.0", false)
+	must(t, os.MkdirAll(h.appDir("kb_facilite")+"/.git", 0o755))
 	return h
 }
 
@@ -250,7 +250,7 @@ func TestUpdatesCommandJSONIsReadOnly(t *testing.T) {
 	}
 	want := map[string]string{
 		"kb_pro": stateUpdateAvailable, "kb_compta": stateUpToDate,
-		"kb_cheque": stateUnknown, "kb_stock": stateNotArchive,
+		"kb_cheque": stateUnknown, "kb_facilite": stateNotArchive,
 	}
 	for app, state := range want {
 		if byApp[app].State != state {

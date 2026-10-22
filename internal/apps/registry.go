@@ -65,7 +65,6 @@ var All = []App{
 	row("kb_cheque", "standard"),
 	row("kb_facilite", "standard"),
 	row("kb_print", "standard"),
-	row("kb_stock", "standard"),
 	row("HR2025", "full"),
 	row("kb_distri", "full"),
 	row("kb_commercial", "full"),

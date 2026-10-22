@@ -103,12 +103,12 @@ func TestPlanInstall(t *testing.T) {
 	all := []apps.App{
 		{Name: "kb_pro"},
 		{Name: "kb_compta"},
-		{Name: "kb_stock"},
+		{Name: "kb_facilite"},
 		{Name: "kb_print"},
 	}
-	allowed := map[string]bool{"kb_pro": true, "kb_compta": true, "kb_stock": true}
-	inBench := map[string]bool{"kb_pro": true, "kb_stock": true}
-	installed := map[string]bool{"kb_stock": true}
+	allowed := map[string]bool{"kb_pro": true, "kb_compta": true, "kb_facilite": true}
+	inBench := map[string]bool{"kb_pro": true, "kb_facilite": true}
+	installed := map[string]bool{"kb_facilite": true}
 
 	tests := []struct {
 		name         string
@@ -129,8 +129,8 @@ func TestPlanInstall(t *testing.T) {
 		},
 		{
 			name:        "already installed on this site",
-			preselected: []string{"kb_stock"},
-			wantErr:     `app "kb_stock" is already installed on this site — use: kb upgrade to update it`,
+			preselected: []string{"kb_facilite"},
+			wantErr:     `app "kb_facilite" is already installed on this site — use: kb upgrade to update it`,
 		},
 		{
 			name:         "already in the bench — site install only",
@@ -183,9 +183,9 @@ func TestPlanInstall(t *testing.T) {
 // longer hides apps that are downloaded but not installed on the site — hiding
 // them is what pushed operators onto the --apps path that then rejected them.
 func TestInstallSelectable_listsBenchPresentApps(t *testing.T) {
-	all := []apps.App{{Name: "kb_pro"}, {Name: "kb_compta"}, {Name: "kb_stock"}, {Name: "kb_print"}}
-	allowed := map[string]bool{"kb_pro": true, "kb_compta": true, "kb_stock": true}
-	installed := map[string]bool{"kb_stock": true}
+	all := []apps.App{{Name: "kb_pro"}, {Name: "kb_compta"}, {Name: "kb_facilite"}, {Name: "kb_print"}}
+	allowed := map[string]bool{"kb_pro": true, "kb_compta": true, "kb_facilite": true}
+	installed := map[string]bool{"kb_facilite": true}
 
 	var got []string
 	for _, a := range installSelectable(all, allowed, installed) {

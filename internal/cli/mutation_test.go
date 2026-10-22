@@ -193,7 +193,7 @@ func TestCapturedRequestSelectors(t *testing.T) {
 		{[]string{"init-kb-frappe"}, "major=1"}, // first: the others refuse while apps/frappe is stock
 		{[]string{"add", "--apps", "kb_pro"}, "major=1"},
 		{[]string{"add", "--apps", "kb_compta", "--version", "v1.1.0"}, "v=v1.1.0"},
-		{[]string{"install", "--apps", "kb_stock"}, "major=1"},
+		{[]string{"install", "--apps", "kb_print"}, "major=1"},
 		{[]string{"upgrade", "--apps", "kb_cheque"}, "major=1"},
 		{[]string{"upgrade", "--to", "kb_facilite=v1.1.0"}, "release=1&v=v1.1.0"},
 	}

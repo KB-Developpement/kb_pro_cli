@@ -337,7 +337,6 @@ Names and default **tier** metadata (authoritative allowed list is always the **
 | `kb_cheque` | KB-Developpement/kb_cheque | standard | |
 | `kb_facilite` | KB-Developpement/kb_facilite | standard | |
 | `kb_print` | KB-Developpement/kb_print | standard | |
-| `kb_stock` | KB-Developpement/kb_stock | standard | |
 | `HR2025` | KB-Developpement/HR2025 | full | |
 | `kb_distri` | KB-Developpement/kb_distri | full | |
 | `kb_commercial` | KB-Developpement/kb_commercial | full | |
