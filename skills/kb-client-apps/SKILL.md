@@ -3,7 +3,7 @@ name: kb-client-apps
 description: >
   Day-to-day KB app management on a client bench with the `kb` CLI: install, add,
   site-install, upgrade, uninstall and remove KB-Developpement Frappe apps (kb_pro,
-  kb_compta, kb_cheque, kb_facilite, kb_print, kb_stock, HR2025, kb_distri,
+  kb_compta, kb_cheque, kb_facilite, kb_print, HR2025, kb_distri,
   kb_commercial, AchatsExtern), upgrade the KB Frappe fork, pin an app version, recover
   from a failed upgrade (`.kb-old` rollback, `bench migrate` failures), handle the dev
   server and production restarts, and self-update `kb`. Use this skill whenever someone
@@ -27,7 +27,7 @@ errors see `kb-client-license`; for symptoms without an obvious cause see
   (`GET /download/<app>`); the server re-checks the license on every download. There is
   no git clone and no client-side GitHub token. App source lands without `.git`.
 - The app list is fixed in `kb` (registry): `kb_pro, kb_compta, kb_cheque, kb_facilite,
-  kb_print, kb_stock` (standard tier) and `HR2025, kb_distri, kb_commercial,
+  kb_print` (standard tier) and `HR2025, kb_distri, kb_commercial,
   AchatsExtern` (full tier). What a customer may install is the **`allowed_apps` claim
   in their token**, shown by `kb license`. Other apps (e.g. kb_ai, kb_kbdev) are not
   managed by `kb`.
@@ -115,7 +115,7 @@ the CLI: upgrade apps with `kb upgrade` as before. Apply with `kb upgrade --apps
 6. Dev server restarted / started again; on prod a reminder to restart services.
 
 Install dependencies first: `kb_pro` before apps that require it (kb_compta, kb_cheque,
-kb_stock, AchatsExtern…). In one `kb install --apps kb_pro,kb_compta`, downloads run in
+AchatsExtern…). In one `kb install --apps kb_pro,kb_compta`, downloads run in
 parallel but site installs run in the listed order — list `kb_pro` first.
 
 ## Upgrade — what actually runs, and how it fails

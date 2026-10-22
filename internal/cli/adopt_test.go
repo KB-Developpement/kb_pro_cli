@@ -67,7 +67,7 @@ func TestAdoptUntouchedBench(t *testing.T) {
 		}
 	}
 	// kb upgrade still iterates the same apps.All: the framework is not in it.
-	if len(apps.All) != 10 {
+	if len(apps.All) != 9 {
 		t.Errorf("apps.All has %d rows", len(apps.All))
 	}
 	for _, a := range apps.All {
@@ -471,11 +471,11 @@ func TestAdoptSkipsAndRefusesByRule(t *testing.T) {
 	h := legacyBench(t)
 	h.seed("kb_distri", "v1.2.0", false)
 	h.seed("kb_cheque", "v1.2.0", true) // valid receipt: skipped
-	h.seed("kb_stock", "v1.2.0", false) // not licensed: skipped
+	h.seed("kb_facilite", "v1.2.0", false) // not licensed: skipped
 	allowed := allowedSetFn
 	allowedSetFn = func() map[string]bool {
 		m := allowed()
-		delete(m, "kb_stock")
+		delete(m, "kb_facilite")
 		return m
 	}
 	defer func() { allowedSetFn = allowed }()
@@ -484,17 +484,17 @@ func TestAdoptSkipsAndRefusesByRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("skipped apps must not affect the exit code: %v\n%s", err, out)
 	}
-	for _, want := range []string{"kb_distri: skipped", "kb_cheque: skipped", "kb_stock: skipped — not in your license"} {
+	for _, want := range []string{"kb_distri: skipped", "kb_cheque: skipped", "kb_facilite: skipped — not in your license"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
 	for _, d := range h.srv.downloads() {
-		if p := strings.TrimPrefix(d.Path, "/download/"); p == "kb_distri" || p == "kb_cheque" || p == "kb_stock" {
+		if p := strings.TrimPrefix(d.Path, "/download/"); p == "kb_distri" || p == "kb_cheque" || p == "kb_facilite" {
 			t.Errorf("a skipped app was downloaded: %s", p)
 		}
 	}
-	if h.receipt("kb_distri").Valid() || h.receipt("kb_stock").Valid() {
+	if h.receipt("kb_distri").Valid() || h.receipt("kb_facilite").Valid() {
 		t.Error("receipts written for skipped apps")
 	}
 
